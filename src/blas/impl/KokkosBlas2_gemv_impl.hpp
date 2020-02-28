@@ -559,7 +559,8 @@ private:
 template<class AViewType,
          class XViewType,
          class YViewType,
-         class IndexType = typename AViewType::size_type>
+         class IndexType = typename AViewType::size_type,
+         class execution_space = typename AViewType::execution_space>
 void
 twoLevelGemv (const char trans[],
               typename AViewType::const_value_type& alpha,
@@ -584,7 +585,7 @@ twoLevelGemv (const char trans[],
                  "IndexType must be an integer");
 
   using y_value_type    = typename YViewType::non_const_value_type;
-  using execution_space = typename AViewType::execution_space;
+  //using execution_space = typename AViewType::execution_space;
   using team_policy_type  = Kokkos::TeamPolicy<execution_space>;
   using range_policy_type = Kokkos::RangePolicy<execution_space, IndexType>;
 

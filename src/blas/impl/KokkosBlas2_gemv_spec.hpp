@@ -102,6 +102,7 @@ namespace Impl {
 template<class AViewType,
          class XViewType,
          class YViewType,
+         class ExecutionSpace,
          bool tpl_spec_avail = gemv_tpl_spec_avail<AViewType, XViewType, YViewType>::value,
          bool eti_spec_avail = gemv_eti_spec_avail<AViewType, XViewType, YViewType>::value
          >
@@ -136,7 +137,7 @@ struct GEMV {
     if (numRows < static_cast<size_type> (INT_MAX) &&
         numCols < static_cast<size_type> (INT_MAX)) {
       #if 1
-      twoLevelGemv<AViewType, XViewType, YViewType, int>
+      twoLevelGemv<AViewType, XViewType, YViewType, int, ExecutionSpace>
          (trans, alpha, A, x, beta, y);
       #else
       singleLevelGemv<AViewType, XViewType, YViewType, int>
@@ -145,7 +146,7 @@ struct GEMV {
     }
     else {
       #if 1
-      twoLevelGemv<AViewType, XViewType, YViewType, int64_t>
+      twoLevelGemv<AViewType, XViewType, YViewType, int64_t, ExecutionSpace>
          (trans, alpha, A, x, beta, y);
       #else
       singleLevelGemv<AViewType, XViewType, YViewType, int64_t>
@@ -188,6 +189,7 @@ extern template struct GEMV< \
                                                          Kokkos::LayoutLeft, LAYOUT>::type, \
                   Kokkos::Device<EXEC_SPACE, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     EXEC_SPACE, \
      false, true>;
 
 #define KOKKOSBLAS2_GEMV_ETI_SPEC_INST( SCALAR, LAYOUT, EXEC_SPACE, MEM_SPACE ) \
@@ -204,6 +206,7 @@ template struct GEMV< \
                                                          Kokkos::LayoutLeft, LAYOUT>::type, \
                   Kokkos::Device<EXEC_SPACE, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >,  \
+     EXEC_SPACE, \
      false, true>;
 
 

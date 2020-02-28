@@ -59,6 +59,7 @@ struct GEMV< \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
      Kokkos::View<double*, LAYOUTY, Kokkos::Device<ExecSpace, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     ExecSpace, \
      true, ETI_SPEC_AVAIL> { \
   typedef double SCALAR; \
   typedef Kokkos::View<const SCALAR**, LAYOUTA, Kokkos::Device<ExecSpace, MEM_SPACE>, \
@@ -96,6 +97,7 @@ struct GEMV< \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
      Kokkos::View<float*, LAYOUTY, Kokkos::Device<ExecSpace, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     ExecSpace, \
      true, ETI_SPEC_AVAIL> { \
   typedef float SCALAR; \
   typedef Kokkos::View<const SCALAR**, LAYOUTA, Kokkos::Device<ExecSpace, MEM_SPACE>, \
@@ -133,6 +135,7 @@ struct GEMV< \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
      Kokkos::View<Kokkos::complex<double>*, LAYOUTY, Kokkos::Device<ExecSpace, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     ExecSpace, \
      true, ETI_SPEC_AVAIL> { \
   typedef Kokkos::complex<double> SCALAR; \
   typedef Kokkos::View<const SCALAR**, LAYOUTA, Kokkos::Device<ExecSpace, MEM_SPACE>, \
@@ -177,6 +180,7 @@ struct GEMV< \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
      Kokkos::View<Kokkos::complex<float>*, LAYOUTY, Kokkos::Device<ExecSpace, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     ExecSpace, \
      true, ETI_SPEC_AVAIL> { \
   typedef Kokkos::complex<float> SCALAR; \
   typedef Kokkos::View<const SCALAR**, LAYOUTA, Kokkos::Device<ExecSpace, MEM_SPACE>, \
@@ -252,6 +256,7 @@ struct GEMV< \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
      Kokkos::View<double*, LAYOUTY, Kokkos::Device<ExecSpace, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     ExecSpace, \
      true, ETI_SPEC_AVAIL> { \
   typedef double SCALAR; \
   typedef Kokkos::View<const SCALAR**, LAYOUTA, Kokkos::Device<ExecSpace, MEM_SPACE>, \
@@ -298,6 +303,7 @@ struct GEMV< \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
      Kokkos::View<float*, LAYOUTY, Kokkos::Device<ExecSpace, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     ExecSpace, \
      true, ETI_SPEC_AVAIL> { \
   typedef float SCALAR; \
   typedef Kokkos::View<const SCALAR**, LAYOUTA, Kokkos::Device<ExecSpace, MEM_SPACE>, \
@@ -344,6 +350,7 @@ struct GEMV< \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
      Kokkos::View<Kokkos::complex<double>*, LAYOUTY, Kokkos::Device<ExecSpace, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     ExecSpace, \
      true, ETI_SPEC_AVAIL> { \
   typedef Kokkos::complex<double> SCALAR; \
   typedef Kokkos::View<const SCALAR**, LAYOUTA, Kokkos::Device<ExecSpace, MEM_SPACE>, \
@@ -390,6 +397,7 @@ struct GEMV< \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
      Kokkos::View<Kokkos::complex<float>*, LAYOUTY, Kokkos::Device<ExecSpace, MEM_SPACE>, \
                   Kokkos::MemoryTraits<Kokkos::Unmanaged> >, \
+     ExecSpace, \
      true, ETI_SPEC_AVAIL> { \
   typedef Kokkos::complex<float> SCALAR; \
   typedef Kokkos::View<const SCALAR**, LAYOUTA, Kokkos::Device<ExecSpace, MEM_SPACE>, \

@@ -72,7 +72,8 @@ namespace KokkosBlas {
 /// \param y [in/out] Output vector, as a nonconst 1-D Kokkos::View
 template<class AViewType,
          class XViewType,
-         class YViewType>
+         class YViewType,
+         class ExecutionSpace = typename AViewType::execution_space>
 void
 gemv (const char trans[],
       typename AViewType::const_value_type& alpha,
@@ -144,12 +145,12 @@ gemv (const char trans[],
   if (A.extent(0) == 0 || A.extent(1) == 0)
   {
     const bool eti_spec_avail = KokkosBlas::Impl::gemv_eti_spec_avail<AVT, XVT, YVT>::value;
-    typedef Impl::GEMV<AVT, XVT, YVT, false, eti_spec_avail> fallback_impl_type;
+    typedef Impl::GEMV<AVT, XVT, YVT, ExecutionSpace, false, eti_spec_avail> fallback_impl_type;
     fallback_impl_type::gemv (trans, alpha, A, x, beta, y);
   }
   else 
   {
-    typedef Impl::GEMV<AVT, XVT, YVT> impl_type;
+    typedef Impl::GEMV<AVT, XVT, YVT, ExecutionSpace> impl_type;
     impl_type::gemv (trans, alpha, A, x, beta, y);
   }
 
