@@ -73,14 +73,15 @@ namespace KokkosBlas {
 template<class AViewType,
          class XViewType,
          class YViewType,
-         class ExecutionSpace = typename AViewType::execution_space>
+         class ExecutionSpace>
 void
 gemv (const char trans[],
       typename AViewType::const_value_type& alpha,
       const AViewType& A,
       const XViewType& x,
       typename YViewType::const_value_type& beta,
-      const YViewType& y)
+      const YViewType& y,
+      ExecutionSpace exec_space)
 {
   static_assert (Kokkos::Impl::is_view<AViewType>::value,
                  "AViewType must be a Kokkos::View.");
@@ -154,6 +155,21 @@ gemv (const char trans[],
     impl_type::gemv (trans, alpha, A, x, beta, y);
   }
 
+}
+
+template<class AViewType,
+         class XViewType,
+         class YViewType>
+void
+gemv (const char trans[],
+      typename AViewType::const_value_type& alpha,
+      const AViewType& A,
+      const XViewType& x,
+      typename YViewType::const_value_type& beta,
+      const YViewType& y)
+{
+  using ExecutionSpace = typename AViewType::execution_space;
+  gemv (trans, alpha, A, x, beta, y, ExecutionSpace());
 }
 
 } // namespace KokkosBlas

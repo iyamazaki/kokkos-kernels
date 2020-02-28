@@ -52,6 +52,7 @@
 #include <KokkosSparse_sptrsv_handle.hpp>
 #include <KokkosSparse_spmv.hpp>
 #include <KokkosSparse_CrsMatrix.hpp>
+#include <KokkosKernels_ExecSpaceUtils.hpp>
 
 #if defined(KOKKOSKERNELS_ENABLE_TPL_CBLAS)   && \
     defined(KOKKOSKERNELS_ENABLE_TPL_LAPACKE) && \
@@ -2586,8 +2587,18 @@ cudaProfilerStop();
   Kokkos::View<scalar_t*, memory_space> work = thandle.get_workspace ();
 #endif
 
-  size_type node_count = 0;
+  // create execution streams
+  #define SPTRSV_WITH_STREAMS
+  #if defined(SPTRSV_WITH_STREAMS)
+  const size_type num_streams = 1;
+  auto streams = new execution_space [num_streams];
+  for (size_type i = 0; i < num_streams; i++) {
+    execution_space space = KokkosKernels::Impl::Experimental::SpaceInstance<execution_space>::create ();
+    streams [i] = KokkosKernels::Impl::Experimental::SpaceInstance<execution_space>::create ();
+  }
+  #endif
 
+  size_type node_count = 0;
   for ( size_type lvl = 0; lvl < nlevels; ++lvl ) {
    {
     size_type lvl_nodes = hnodes_per_level(lvl);
@@ -2675,7 +2686,8 @@ cudaProfilerStart();
             int workoffset = work_offset_host (s);
 
             // create a view for the s-th supernocal block column
-            Kokkos::View<scalar_t**, Kokkos::LayoutLeft, memory_space, Kokkos::MemoryUnmanaged> viewL (&dataL[i1], nsrow, nscol);
+            using supernode_view_type = Kokkos::View<scalar_t**, Kokkos::LayoutLeft, memory_space, Kokkos::MemoryUnmanaged>;
+            supernode_view_type viewL (&dataL[i1], nsrow, nscol);
 
             // "triangular-solve" to compute Xj
             if (invert_offdiagonal) {
@@ -2683,9 +2695,13 @@ cudaProfilerStart();
               auto Xj = Kokkos::subview (lhs, range_type (j1, j2));                      // part of the solution, corresponding to the diagonal block
               auto Ljj = Kokkos::subview (viewL, range_type (0, nsrow), Kokkos::ALL ()); // s-th supernocal column of L
               KokkosBlas::
-              gemv("N", one,  Ljj,
+              gemv ("N", one,  Ljj,
                               Xj,
-                        zero, Y);
+                        zero, Y
+                    #if defined(SPTRSV_WITH_STREAMS)
+                    , streams [league_rank % num_streams]
+                    #endif
+                   );
               Kokkos::deep_copy(Xj, Y);
             } else {
               auto Y = Kokkos::subview (work, range_type(workoffset, workoffset+nscol));
@@ -2693,9 +2709,13 @@ cudaProfilerStart();
               auto Ljj = Kokkos::subview (viewL, range_type (0, nscol), Kokkos::ALL ()); // diagonal block of s-th supernocal column of L
               Kokkos::deep_copy(Y, Xj);
               KokkosBlas::
-              gemv("N", one,  Ljj,
+              gemv ("N", one,  Ljj,
                               Y,
-                        zero, Xj);
+                        zero, Xj
+                    #if defined(SPTRSV_WITH_STREAMS)
+                    , streams [league_rank % num_streams]
+                    #endif
+                    );
 
               // update off-diagonal blocks
               int nsrow2 = nsrow - nscol;  // "total" number of rows in all the off-diagonal supernodes
@@ -2703,9 +2723,13 @@ cudaProfilerStart();
                 auto Z = Kokkos::subview (work, range_type(workoffset+nscol, workoffset+nsrow));  // workspace, needed with gemv for update&scatter
                 auto Lij = Kokkos::subview (viewL, range_type (nscol, nsrow), Kokkos::ALL ()); // off-diagonal blocks of s-th supernodal column of L
                 KokkosBlas::
-                gemv("N", one,  Lij,
+                gemv ("N", one,  Lij,
                                 Xj,
-                          zero, Z);
+                          zero, Z
+                      #if defined(SPTRSV_WITH_STREAMS)
+                      , streams [league_rank % num_streams]
+                      #endif
+                      );
               }
             }
           }
@@ -2789,6 +2813,12 @@ cudaProfilerStop();
 
   } // end for lvl
 
+  #if defined(SPTRSV_WITH_STREAMS)
+  // destroy execution streams
+  for (size_type i = 0; i < num_streams; i++) {
+    KokkosKernels::Impl::Experimental::SpaceInstance<execution_space>::destroy (streams [i]);
+  }
+  #endif
 } // end lower_tri_solve
 
 
