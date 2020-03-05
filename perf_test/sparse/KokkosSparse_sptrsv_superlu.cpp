@@ -253,7 +253,8 @@ void free_superlu (SuperMatrix &L, SuperMatrix &U,
 /* ========================================================================================= */
 template<typename scalar_type>
 int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filename, bool symm_mode, bool metis, bool merge,
-                      bool invert_offdiag, bool u_in_csr, int panel_size, int relax_size, int block_size, int num_streams, int loop) {
+                      bool invert_diag, bool invert_offdiag, bool u_in_csr, int panel_size, int relax_size,
+                      int block_size, int num_streams, int loop) {
 
   using ordinal_type = int;
   using size_type    = int;
@@ -360,18 +361,30 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
             khL.create_sptrsv_handle (SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG, nrows, true);
             khU.create_sptrsv_handle (SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG, nrows, false);
           }
+          khU.set_sptrsv_unit_diagonal (false);
+          khL.set_sptrsv_unit_diagonal (true);
+
           // verbose (optional, default is false)
           khU.set_sptrsv_verbose (verbose);
           khL.set_sptrsv_verbose (verbose);
 
           // specify if U is stored in CSR or CSC
+          std::cout << "=============================== " << std::endl;
+          std::cout << " U in CSR           : " << u_in_csr << std::endl;
           khU.set_sptrsv_column_major (!u_in_csr);
 
           // specify wheather to merge supernodes (optional, default merge is false)
+          std::cout << " Merge Supernode    : " << merge << std::endl;
           khL.set_sptrsv_merge_supernodes (merge);
           khU.set_sptrsv_merge_supernodes (merge);
 
+          // specify wheather to invert diagonal blocks
+          std::cout << " Invert Diagonal    : " << invert_diag << std::endl;
+          khL.set_sptrsv_invert_diagonal (invert_diag);
+          khU.set_sptrsv_invert_diagonal (invert_diag);
+          
           // specify wheather to apply diagonal-inversion to off-diagonal blocks (optional, default is false)
+          std::cout << " Invert Off-diagonal: " << invert_offdiag << std::endl;
           khL.set_sptrsv_invert_offdiagonal (invert_offdiag);
           khU.set_sptrsv_invert_offdiagonal (invert_offdiag);
           
@@ -387,23 +400,30 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
 
           // block size to switch to device call
           if (block_size > 0) {
+            std::cout << " Block Size         : " << block_size << std::endl;
             khL.set_sptrsv_diag_supernode_sizes (block_size, block_size);
-            khL.set_sptrsv_diag_supernode_sizes (block_size, block_size);
+            khU.set_sptrsv_diag_supernode_sizes (block_size, block_size);
           }
 
           // set number of streams
+          std::cout << " Number of Streams  : " << num_streams << std::endl;
+          std::cout << "=============================== " << std::endl << std::endl;
           khL.set_sptrsv_num_streams (num_streams);
           khU.set_sptrsv_num_streams (num_streams);
 
           // ==============================================
           // do symbolic analysis (preprocssing, e.g., merging supernodes, inverting diagonal/offdiagonal blocks,
           // and scheduling based on graph/dag)
+          timer.reset();
           sptrsv_symbolic<scalar_type, ordinal_type, size_type> (&khL, &khU, L, U);
+          std::cout << "   Symbolic Time   : " << timer.seconds() << std::endl << std::endl;
 
 
           // ==============================================
           // do numeric compute (copy numerical values from SuperLU data structure to our sptrsv data structure)
+          timer.reset();
           sptrsv_compute<scalar_type, ordinal_type, size_type> (&khL, &khU, L, U);
+          std::cout << "   Numeric Time   : " << timer.seconds() << std::endl << std::endl;
 
 
           // ==============================================
@@ -485,7 +505,7 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
 
           // Benchmark
           // L-solve
-          double min_time = 1.0e32;
+          double min_time = 0.0;
           double max_time = 0.0;
           double ave_time = 0.0;
           Kokkos::fence ();
@@ -495,9 +515,8 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
             Kokkos::fence();
             double time = timer.seconds ();
             ave_time += time;
-            if(time > max_time) max_time = time;
-            if(time < min_time) min_time = time;
-            //std::cout << time << std::endl;
+            if(time > max_time || i == 0) max_time = time;
+            if(time < min_time || i == 0) min_time = time;
           }
           std::cout << " L-solve: loop = " << loop << std::endl;
           std::cout << "  LOOP_AVG_TIME:  " << ave_time/loop << std::endl;
@@ -505,7 +524,7 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
           std::cout << "  LOOP_MIN_TIME:  " << min_time << std::endl << std::endl;
 
           // U-solve
-          min_time = 1.0e32;
+          min_time = 0.0;
           max_time = 0.0;
           ave_time = 0.0;
           Kokkos::fence ();
@@ -515,9 +534,8 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
             Kokkos::fence();
             double time = timer.seconds ();
             ave_time += time;
-            if(time > max_time) max_time = time;
-            if(time < min_time) min_time = time;
-            //std::cout << time << std::endl;
+            if(time > max_time || i == 0) max_time = time;
+            if(time < min_time || i == 0) min_time = time;
           }
           std::cout << " U-solve: loop = " << loop << std::endl;
           std::cout << "  LOOP_AVG_TIME:  " << ave_time/loop << std::endl;
@@ -532,7 +550,8 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
           khL.create_sptrsv_handle (SPTRSVAlgorithm::SUPERNODAL_NAIVE, nrows, true);
           khU.create_sptrsv_handle (SPTRSVAlgorithm::SUPERNODAL_NAIVE, nrows, false);
 
-          khL.set_sptrsv_column_major (!u_in_csr);
+          khU.set_sptrsv_unit_diagonal (false);
+          khL.set_sptrsv_unit_diagonal (true);
           khU.set_sptrsv_column_major (!u_in_csr);
 
           // ==============================================
@@ -609,6 +628,8 @@ int main(int argc, char **argv) {
   bool metis = false;
   // merge supernodes
   bool merge = false;
+  // invert diagonal of L-factor
+  bool invert_diag = false;
   // invert off-diagonal of L-factor
   bool invert_offdiag = false;
   // store U in CSR, or CSC
@@ -674,6 +695,10 @@ int main(int argc, char **argv) {
       merge = true;
       continue;
     }
+    if((strcmp(argv[i],"--invert-diag")==0)) {
+      invert_diag = true;
+      continue;
+    }
     if((strcmp(argv[i],"--invert-offdiag")==0)) {
       invert_offdiag = true;
       continue;
@@ -713,6 +738,7 @@ int main(int argc, char **argv) {
 
   // If eti-type complex<double> is enabled at compile time, this is what
   // the perf_test will use
+#if 0
   #if defined(KOKKOSKERNELS_INST_COMPLEX_DOUBLE)
     using scalar_t = Kokkos::complex<double>;
     scalarTypeString = "(scalar_t = Kokkos::complex<double>)";
@@ -726,8 +752,13 @@ int main(int argc, char **argv) {
       #error "Invalid type specified in KOKKOSKERNELS_SCALARS, supported types are "double,complex<double>""
     #endif
   #endif
+#else
+  using scalar_t = double;
+  scalarTypeString = "(scalar_t = double)";
+#endif
+
   int total_errors = test_sptrsv_perf<scalar_t> (tests, verbose, filename, symm_mode, metis, merge,
-                                                 invert_offdiag, u_in_csr, panel_size, relax_size,
+                                                 invert_diag,  invert_offdiag, u_in_csr, panel_size, relax_size,
                                                  block_size, num_streams, loop);
   if(total_errors == 0)
     std::cout << "Kokkos::SPTRSV Test: Passed " << scalarTypeString
