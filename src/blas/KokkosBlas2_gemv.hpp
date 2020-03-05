@@ -147,12 +147,12 @@ gemv (const char trans[],
   {
     const bool eti_spec_avail = KokkosBlas::Impl::gemv_eti_spec_avail<AVT, XVT, YVT>::value;
     typedef Impl::GEMV<AVT, XVT, YVT, ExecutionSpace, false, eti_spec_avail> fallback_impl_type;
-    fallback_impl_type::gemv (trans, alpha, A, x, beta, y);
+    fallback_impl_type::gemv (trans, alpha, A, x, beta, y, exec_space);
   }
   else 
   {
     typedef Impl::GEMV<AVT, XVT, YVT, ExecutionSpace> impl_type;
-    impl_type::gemv (trans, alpha, A, x, beta, y);
+    impl_type::gemv (trans, alpha, A, x, beta, y, exec_space);
   }
 
 }

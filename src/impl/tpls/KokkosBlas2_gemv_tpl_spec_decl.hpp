@@ -75,7 +75,8 @@ struct GEMV< \
         const AViewType& A, \
         const XViewType& X, \
         typename YViewType::const_value_type& beta, \
-        const YViewType& Y) { \
+        const YViewType& Y, \
+        ExecSpace exec_space) { \
     \
     Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_BLAS,double]"); \
     const int M = static_cast<int> (A.extent(0)); \
@@ -113,7 +114,8 @@ struct GEMV< \
         const AViewType& A, \
         const XViewType& X, \
         typename YViewType::const_value_type& beta, \
-        const YViewType& Y) { \
+        const YViewType& Y, \
+        ExecSpace exec_space) { \
     \
     Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_BLAS,float]"); \
     const int M = static_cast<int> (A.extent(0)); \
@@ -151,7 +153,8 @@ struct GEMV< \
         const AViewType& A, \
         const XViewType& X, \
         typename YViewType::const_value_type& beta, \
-        const YViewType& Y) { \
+        const YViewType& Y, \
+        ExecSpace exec_space) { \
     \
     Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_BLAS,complex<double>]"); \
     const int M = static_cast<int> (A.extent(0)); \
@@ -196,7 +199,8 @@ struct GEMV< \
         const AViewType& A, \
         const XViewType& X, \
         typename YViewType::const_value_type& beta, \
-        const YViewType& Y) { \
+        const YViewType& Y, \
+        ExecSpace exec_space) { \
     \
     Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_BLAS,complex<float>]"); \
     const int M = static_cast<int> (A.extent(0)); \
@@ -272,7 +276,8 @@ struct GEMV< \
         const AViewType& A, \
         const XViewType& X, \
         typename YViewType::const_value_type& beta, \
-        const YViewType& Y) { \
+        const YViewType& Y, \
+        ExecSpace exec_space) { \
     \
     Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_CUBLAS,double]"); \
     const int M = static_cast<int> (A.extent(0)); \
@@ -289,6 +294,7 @@ struct GEMV< \
     else \
       transa = CUBLAS_OP_C; \
     KokkosBlas::Impl::CudaBlasSingleton & s = KokkosBlas::Impl::CudaBlasSingleton::singleton(); \
+    cublasSetStream( s.handle, exec_space.cuda_stream()); \
     cublasDgemv(s.handle, transa, M, N, &alpha, A.data(), LDA, X.data(), one, &beta, Y.data(), one); \
     Kokkos::Profiling::popRegion(); \
   } \
@@ -319,7 +325,8 @@ struct GEMV< \
         const AViewType& A, \
         const XViewType& X, \
         typename YViewType::const_value_type& beta, \
-        const YViewType& Y) { \
+        const YViewType& Y, \
+        ExecSpace exec_space) { \
     \
     Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_CUBLAS,float]"); \
     const int M = static_cast<int> (A.extent(0)); \
@@ -336,6 +343,7 @@ struct GEMV< \
     else \
       transa = CUBLAS_OP_C; \
     KokkosBlas::Impl::CudaBlasSingleton & s = KokkosBlas::Impl::CudaBlasSingleton::singleton(); \
+    cublasSetStream( s.handle, exec_space.cuda_stream()); \
     cublasSgemv(s.handle, transa, M, N, &alpha, A.data(), LDA, X.data(), one, &beta, Y.data(), one); \
     Kokkos::Profiling::popRegion(); \
   } \
@@ -366,7 +374,8 @@ struct GEMV< \
         const AViewType& A, \
         const XViewType& X, \
         typename YViewType::const_value_type& beta, \
-        const YViewType& Y) { \
+        const YViewType& Y, \
+        ExecSpace exec_space) { \
     \
     Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_CUBLAS,complex<double>]"); \
     const int M = static_cast<int> (A.extent(0)); \
@@ -383,6 +392,7 @@ struct GEMV< \
     else \
       transa = CUBLAS_OP_C; \
     KokkosBlas::Impl::CudaBlasSingleton & s = KokkosBlas::Impl::CudaBlasSingleton::singleton(); \
+    cublasSetStream( s.handle, exec_space.cuda_stream()); \
     cublasZgemv(s.handle, transa, M, N, reinterpret_cast<const cuDoubleComplex*>(&alpha), reinterpret_cast<const cuDoubleComplex*>(A.data()), LDA, reinterpret_cast<const cuDoubleComplex*>(X.data()), one, reinterpret_cast<const cuDoubleComplex*>(&beta), reinterpret_cast<cuDoubleComplex*>(Y.data()), one); \
     Kokkos::Profiling::popRegion(); \
   } \
@@ -413,7 +423,8 @@ struct GEMV< \
         const AViewType& A, \
         const XViewType& X, \
         typename YViewType::const_value_type& beta, \
-        const YViewType& Y) { \
+        const YViewType& Y, \
+        ExecSpace exec_space) { \
     \
     Kokkos::Profiling::pushRegion("KokkosBlas::gemv[TPL_CUBLAS,complex<float>]"); \
     const int M = static_cast<int> (A.extent(0)); \
@@ -430,6 +441,7 @@ struct GEMV< \
     else \
       transa = CUBLAS_OP_C; \
     KokkosBlas::Impl::CudaBlasSingleton & s = KokkosBlas::Impl::CudaBlasSingleton::singleton(); \
+    cublasSetStream( s.handle, exec_space.cuda_stream()); \
     cublasCgemv(s.handle, transa, M, N, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(A.data()), LDA, reinterpret_cast<const cuComplex*>(X.data()), one, reinterpret_cast<const cuComplex*>(&beta), reinterpret_cast<cuComplex*>(Y.data()), one); \
     Kokkos::Profiling::popRegion(); \
   } \

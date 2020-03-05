@@ -253,7 +253,7 @@ void free_superlu (SuperMatrix &L, SuperMatrix &U,
 /* ========================================================================================= */
 template<typename scalar_type>
 int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filename, bool symm_mode, bool metis, bool merge,
-                      bool invert_offdiag, bool u_in_csr, int panel_size, int relax_size, int loop) {
+                      bool invert_offdiag, bool u_in_csr, int panel_size, int relax_size, int block_size, int num_streams, int loop) {
 
   using ordinal_type = int;
   using size_type    = int;
@@ -384,6 +384,16 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
           // set permutation
           khL.set_sptrsv_perm (perm_r);
           khU.set_sptrsv_perm (perm_c);
+
+          // block size to switch to device call
+          if (block_size > 0) {
+            khL.set_sptrsv_diag_supernode_sizes (block_size, block_size);
+            khL.set_sptrsv_diag_supernode_sizes (block_size, block_size);
+          }
+
+          // set number of streams
+          khL.set_sptrsv_num_streams (num_streams);
+          khU.set_sptrsv_num_streams (num_streams);
 
           // ==============================================
           // do symbolic analysis (preprocssing, e.g., merging supernodes, inverting diagonal/offdiagonal blocks,
@@ -606,6 +616,10 @@ int main(int argc, char **argv) {
   // parameters for SuperLU (only affects factorization)
   int panel_size = sp_ienv(1);
   int relax_size = sp_ienv(2);
+  // block size to switch to device call (default is 100)
+  int block_size  = 0;
+  // number of streams
+  int num_streams = 1;
   // verbose
   bool verbose = true;
 
@@ -676,6 +690,14 @@ int main(int argc, char **argv) {
       relax_size = atoi(argv[++i]);
       continue;
     }
+    if((strcmp(argv[i],"--block-size")==0)) {
+      block_size = atoi(argv[++i]);
+      continue;
+    }
+    if((strcmp(argv[i],"--num-streams")==0)) {
+      num_streams = atoi(argv[++i]);
+      continue;
+    }
     if((strcmp(argv[i],"--help")==0) || (strcmp(argv[i],"-h")==0)) {
       print_help_sptrsv();
       return 0;
@@ -705,7 +727,8 @@ int main(int argc, char **argv) {
     #endif
   #endif
   int total_errors = test_sptrsv_perf<scalar_t> (tests, verbose, filename, symm_mode, metis, merge,
-                                                  invert_offdiag, u_in_csr, panel_size, relax_size, loop);
+                                                 invert_offdiag, u_in_csr, panel_size, relax_size,
+                                                 block_size, num_streams, loop);
   if(total_errors == 0)
     std::cout << "Kokkos::SPTRSV Test: Passed " << scalarTypeString
               << std::endl << std::endl;

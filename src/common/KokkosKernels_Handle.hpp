@@ -644,6 +644,10 @@ public:
   bool is_sptrsv_column_major () {
     return this->sptrsvHandle->is_column_major ();
   }
+
+  void set_sptrsv_num_streams (int num_streams_) {
+    this->sptrsvHandle->setNumStreams(num_streams_);
+  }
 #endif
   void destroy_sptrsv_handle(){
     if (is_owner_of_the_sptrsv_handle && this->sptrsvHandle != nullptr)

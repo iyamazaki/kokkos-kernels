@@ -371,10 +371,9 @@ private:
   crsmat_list_t sub_crsmats;
   crsmat_list_t diag_blocks;
 
-  int num_streams;
-  #if defined(KOKKOS_ENABLE_CUDA)
-  cudaStream_t *cuda_streams;
-  #endif
+  // streams
+  size_type num_streams;
+  execution_space *stream_space;
 
   // verbose
   bool verbose;
@@ -423,6 +422,7 @@ public:
     , sup_size_blocked (200)
     , perm_avail (false)
     , spmv_trans (true)
+    , num_streams (0)
     , verbose (false)
 #endif
   {
@@ -477,9 +477,6 @@ public:
     this->diag_kernel_type = integer_view_t ("diag_kernel_type", nsuper_);
     this->kernel_type_host = integer_view_host_t ("kernel_type_host", nsuper_);
     this->kernel_type = integer_view_t ("kernel_type", nsuper_);
-
-    // number of streams
-    this->num_streams = 0;
   }
 
   // set supernodal dag
@@ -705,22 +702,33 @@ public:
     this->verbose = verbose_;
   }
 
-  #if defined(KOKKOS_ENABLE_CUDA)
   // streams
-  void setNumStreams(int num_streams_) {
-    this->num_streams = num_streams_;
+  void setNumStreams(size_type num_streams_) {
     if (num_streams_ > 0) {
-      this->cuda_streams = (cudaStream_t*)malloc(num_streams_ * sizeof(cudaStream_t));
-      for (int i = 0 ; i < num_streams_; i++) {
-        cudaStreamCreate(&(this->cuda_streams[i]));
+      this->stream_space = new execution_space [num_streams_];
+      for (size_type i = 0; i < num_streams_; i++) {
+        this->stream_space [i] = KokkosKernels::Impl::Experimental::SpaceInstance<execution_space>::create ();
       }
+    } else if (this->num_streams > 0 && num_streams_ == 0) {
+      for (size_type i = 0; i < this->num_streams; i++) {
+        KokkosKernels::Impl::Experimental::SpaceInstance<execution_space>::destroy (this->stream_space [i]);
+      }
+      delete [] this->stream_space;
     }
+    this->num_streams = num_streams_;
   }
 
-  cudaStream_t* getStream(int id) {
-    return &(this->cuda_streams[id]);
+  size_type getNumStreams() {
+    return this->num_streams;
   }
-  #endif
+
+  execution_space getStream(size_type id) {
+    return this->stream_space[id];
+  }
+
+  execution_space* getStreams() {
+    return this->stream_space;
+  }
 #endif
 
   // Requires nrows_ input

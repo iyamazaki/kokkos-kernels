@@ -113,7 +113,8 @@ struct GEMV {
         const AViewType& A,
         const XViewType& x,
         typename YViewType::const_value_type& beta,
-        const YViewType& y)
+        const YViewType& y,
+        ExecutionSpace exec_space)
   #if !defined(KOKKOSKERNELS_ETI_ONLY) || KOKKOSKERNELS_IMPL_COMPILE_LIBRARY
   {
     static_assert (Kokkos::Impl::is_view<AViewType>::value,
@@ -137,8 +138,8 @@ struct GEMV {
     if (numRows < static_cast<size_type> (INT_MAX) &&
         numCols < static_cast<size_type> (INT_MAX)) {
       #if 1
-      twoLevelGemv<AViewType, XViewType, YViewType, int, ExecutionSpace>
-         (trans, alpha, A, x, beta, y);
+      twoLevelGemv<AViewType, XViewType, YViewType, ExecutionSpace, int>
+         (trans, alpha, A, x, beta, y, exec_space);
       #else
       singleLevelGemv<AViewType, XViewType, YViewType, int>
          (trans, alpha, A, x, beta, y);
@@ -146,8 +147,8 @@ struct GEMV {
     }
     else {
       #if 1
-      twoLevelGemv<AViewType, XViewType, YViewType, int64_t, ExecutionSpace>
-         (trans, alpha, A, x, beta, y);
+      twoLevelGemv<AViewType, XViewType, YViewType, ExecutionSpace, int64_t>
+         (trans, alpha, A, x, beta, y, exec_space);
       #else
       singleLevelGemv<AViewType, XViewType, YViewType, int64_t>
          (trans, alpha, A, x, beta, y);
