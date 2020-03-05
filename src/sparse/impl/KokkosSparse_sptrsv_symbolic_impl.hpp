@@ -439,7 +439,7 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
 
     signed_integral_t num_done = 0;
     signed_integral_t level = 0;
-    #define profile_supernodal_etree
+    //#define profile_supernodal_etree
     #ifdef profile_supernodal_etree
     // min, max, tot size of supernodes
     signed_integral_t max_nsrow = 0;

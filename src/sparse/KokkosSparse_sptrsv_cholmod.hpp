@@ -195,11 +195,8 @@ namespace Experimental {
     int *rowind = (int*)(L->s);       // rowind
     scalar_t *Lx = (scalar_t*)(L->x); // data
 
-    bool unit_diag = false;
     bool ptr_by_column = false;
-    //kernelHandle->set_sptrsv_invert_diagonal (true);
-    //kernelHandle->set_sptrsv_invert_offdiagonal (false);
-    return read_supernodal_valuesL<crsmat_t, graph_t> (unit_diag, kernelHandle, n, nsuper,
+    return read_supernodal_valuesL<crsmat_t, graph_t> (kernelHandle, n, nsuper,
                                                        ptr_by_column, mb, nb, colptr, rowind, Lx, static_graph);
   }
 

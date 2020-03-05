@@ -125,7 +125,7 @@ cholmod_factor* factor_cholmod(const int nrow, const int nnz, scalar_type *nzval
 
 /* ========================================================================================= */
 template<typename scalar_type>
-int test_sptrsv_perf(std::vector<int> tests, std::string& filename, int loop) {
+int test_sptrsv_perf(std::vector<int> tests, std::string& filename, bool invert_diag, int loop) {
 
   using STS = Kokkos::Details::ArithTraits<scalar_type>;
   using ordinal_type = int;
@@ -218,7 +218,12 @@ int test_sptrsv_perf(std::vector<int> tests, std::string& filename, int loop) {
           }
 
           // ==============================================
-          // set etree (required)
+          // specify if invert diagonal
+          khL.set_sptrsv_invert_diagonal (invert_diag);
+          khU.set_sptrsv_invert_diagonal (invert_diag);
+
+          // ==============================================
+          // set etree (required if SUPERNODAL_ETREE)
           khL.set_sptrsv_etree (etree);
           khU.set_sptrsv_etree (etree);
 
@@ -405,6 +410,7 @@ int main(int argc, char **argv)
   std::string filename;
 
   int loop = 1;
+  bool invert_diag = false;
 
   if(argc == 1)
   {
@@ -435,6 +441,10 @@ int main(int argc, char **argv)
       loop = atoi(argv[++i]);
       continue;
     }
+    if((strcmp(argv[i],"--invert-diag")==0)) {
+      invert_diag = true;
+      continue;
+    }
     if((strcmp(argv[i],"--help")==0) || (strcmp(argv[i],"-h")==0)) {
       print_help_sptrsv();
       return 0;
@@ -452,7 +462,7 @@ int main(int argc, char **argv)
     // Kokkos::IO may not read complex?
     //int total_errors = test_sptrsv_perf<Kokkos::complex<double>>(tests, filename, loop);
     Kokkos::ScopeGuard kokkosScope (argc, argv);
-    int total_errors = test_sptrsv_perf<double>(tests, filename, loop);
+    int total_errors = test_sptrsv_perf<double>(tests, filename, invert_diag, loop);
     if(total_errors == 0)
       std::cout << "Kokkos::SPTRSV Test: Passed" << std::endl << std::endl;
     else

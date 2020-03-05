@@ -730,6 +730,7 @@ void sptrsv_supernodal_symbolic(
   using graph_t = typename crsmat_t::StaticCrsGraphType;
 
   #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
+  int nrows = graphL_host.numRows ();
   double time_seconds = 0.0;
   Kokkos::Timer timer;
   Kokkos::Timer tic;
@@ -775,7 +776,6 @@ void sptrsv_supernodal_symbolic(
     int nsuper_merged = nsuper;
     #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
     tic.reset ();
-    int nrows = graphL_host.numRows ();
     check_supernode_sizes("Original L-structure", nrows, nsuper, supercols_merged, graphL_host);
     check_supernode_sizes("Original U-structure", nrows, nsuper, supercols_merged, graphU_host);
     #endif
@@ -913,7 +913,7 @@ void sptrsv_supernodal_symbolic(
 /* ========================================================================================= */
 template <typename KernelHandle, typename row_map_type, typename index_type, typename values_type>
 void
-invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper, const int *nb, 
+invert_supernodal_columns(KernelHandle kernelHandle, int nsuper, const int *nb, 
                           row_map_type& hr, index_type& hc, values_type& hv) {
 
   //using values_view_t  = typename crsmat_t::values_type::non_const_type;
@@ -924,6 +924,7 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
 
   // load parameters
   auto *handle = kernelHandle->get_sptrsv_handle ();
+  bool unit_diag = handle->is_unit_diagonal ();
   bool invert_diag = handle->get_invert_diagonal ();
   bool invert_offdiag = handle->get_invert_offdiagonal ();
 
@@ -1002,7 +1003,7 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
 template <typename crsmat_t, typename input_crsmat_t, typename graph_t, typename KernelHandle>
 crsmat_t
 read_merged_supernodes(KernelHandle kernelHandle, int nsuper, const int *nb,
-                       bool unit_diag, input_crsmat_t &L, graph_t &static_graph) {
+                       input_crsmat_t &L, graph_t &static_graph) {
 
   using values_view_t  = typename crsmat_t::values_type::non_const_type;
   using scalar_t = typename values_view_t::value_type;
@@ -1053,7 +1054,7 @@ read_merged_supernodes(KernelHandle kernelHandle, int nsuper, const int *nb,
   }
 
   // invert blocks (TODO done on host for now)
-  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb, hr, hc, hv);
+  invert_supernodal_columns (kernelHandle, nsuper, nb, hr, hc, hv);
   // deepcopy
   Kokkos::deep_copy (values_view, hv);
 
@@ -1073,7 +1074,7 @@ read_merged_supernodes(KernelHandle kernelHandle, int nsuper, const int *nb,
 /* ========================================================================================= */
 template <typename crsmat_t, typename graph_t, typename scalar_t, typename KernelHandle>
 crsmat_t
-read_supernodal_valuesL(bool unit_diag, KernelHandle kernelHandle,
+read_supernodal_valuesL(KernelHandle kernelHandle,
                         int n, int nsuper, bool ptr_by_column, const int *mb, const int *nb,
                         const int *colptr, int *rowind, scalar_t *Lx, graph_t &static_graph) {
 
@@ -1089,6 +1090,7 @@ read_supernodal_valuesL(bool unit_diag, KernelHandle kernelHandle,
   // load parameters
   auto *handle = kernelHandle->get_sptrsv_handle ();
   bool merge = handle->get_merge_supernodes ();
+  bool unit_diag = handle->is_unit_diagonal ();
 
   // load graph
   auto rowmap_view = static_graph.row_map;
@@ -1203,7 +1205,7 @@ read_supernodal_valuesL(bool unit_diag, KernelHandle kernelHandle,
   #endif
 
   // invert blocks (TODO done on host for now)
-  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb, hr, hc, hv);
+  invert_supernodal_columns (kernelHandle, nsuper, nb, hr, hc, hv);
   // deepcopy
   Kokkos::deep_copy (values_view, hv);
 
@@ -1540,9 +1542,8 @@ void split_crsmat(KernelHandle *kernelHandleL, host_crsmat_t superluL) {
 
     // ==============================================
     // read numerical values of L from Cholmod
-    bool unit_diag = false;
     bool ptr_by_column = true;
-    auto crsmatL = read_supernodal_valuesL<crsmat_t> (unit_diag, kernelHandleL,
+    auto crsmatL = read_supernodal_valuesL<crsmat_t> (kernelHandleL,
                                                       nrows, nsuper, ptr_by_column, row_map.data (), supercols,
                                                       row_map.data (), entries.data (), values.data (), graph);
 

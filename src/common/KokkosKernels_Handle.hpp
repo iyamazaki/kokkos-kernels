@@ -579,7 +579,8 @@ public:
     // default SpMV option
     if (algm == KokkosSparse::Experimental::SPTRSVAlgorithm::SUPERNODAL_SPMV ||
         algm == KokkosSparse::Experimental::SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG) {
-      this->set_sptrsv_column_major (true);
+      // at least diag needs to be inverted
+      this->set_sptrsv_invert_diagonal (true);
     }
 #endif
   }
@@ -607,18 +608,23 @@ public:
     this->sptrsvHandle->set_merge_supernodes (flag);
   }
 
+  void set_sptrsv_unit_diagonal(bool flag) {
+    this->sptrsvHandle->set_unit_diagonal (flag);
+  }
+
   void set_sptrsv_invert_diagonal(bool flag) {
+    // it is checked here because internally we switch off, and then back on, in some cases
+    if (!flag && (this->sptrsvHandle->get_algorithm() == KokkosSparse::Experimental::SPTRSVAlgorithm::SUPERNODAL_SPMV ||
+                  this->sptrsvHandle->get_algorithm() == KokkosSparse::Experimental::SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG)) {
+      std::cout << std::endl
+                << " ** need to invert diagonal for SpMV **"
+                << std::endl << std::endl;
+      return;
+    }
     this->sptrsvHandle->set_invert_diagonal (flag);
   }
 
   void set_sptrsv_invert_offdiagonal (bool flag) {
-    if (flag == true && !(this->is_sptrsv_column_major ())) {
-      std::cout << std::endl
-                << " ** cannot invert offdiagonal in CSR **"
-                << std::endl << std::endl;
-      return;
-    }
-
     this->sptrsvHandle->set_invert_offdiagonal (flag);
   }
 
@@ -628,12 +634,6 @@ public:
 
 
   void set_sptrsv_column_major (bool col_major) {
-    if (col_major == false && this->sptrsvHandle->get_invert_offdiagonal ()) {
-      std::cout << std::endl
-                << " ** cannot use CSR for inverting offdiagonal **"
-                << std::endl << std::endl;
-      return;
-    }
     this->sptrsvHandle->set_column_major (col_major);
   }
 

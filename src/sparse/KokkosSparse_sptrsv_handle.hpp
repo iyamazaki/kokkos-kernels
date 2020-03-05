@@ -317,6 +317,9 @@ private:
 #endif
 
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
+  // specify if unit diagonal
+  bool unit_diag;
+
   // stored either in CSR or CSC
   bool col_major;
 
@@ -414,8 +417,9 @@ public:
     , cuSPARSEHandle(nullptr)
 #endif
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
+    , unit_diag (false)
     , merge_supernodes (false)
-    , invert_diagonal (true)
+    , invert_diagonal (false)
     , invert_offdiagonal (false)
     , etree (nullptr)
     , sup_size_unblocked (100)
@@ -581,7 +585,17 @@ public:
 
   // specify to apply the inverse of diagonal to the offdiagonal blocks
   void set_invert_offdiagonal(bool flag) {
+    if (flag == true && !(this->is_column_major ())) {
+      std::cout << std::endl
+                << " ** cannot invert offdiagonal in CSR **"
+                << std::endl << std::endl;
+      return;
+    }
     this->invert_offdiagonal = flag;
+    if (flag) {
+      // invert-offdiag requires invert-diag
+      this->set_invert_diagonal(flag);
+    }
   }
 
   bool get_invert_offdiagonal() {
@@ -652,8 +666,22 @@ public:
     return this->graph;
   }
 
+  // set if unit diagonal
+  void set_unit_diagonal(bool unit_diag_) {
+    this->unit_diag = unit_diag_;
+  }
+  bool is_unit_diagonal() {
+    return this->unit_diag;
+  }
+
   // set CSR or CSC format
   void set_column_major(bool col_major_) {
+    if (col_major_ == false && this->get_invert_offdiagonal ()) {
+      std::cout << std::endl
+                << " ** cannot use CSR for inverting offdiagonal **"
+                << std::endl << std::endl;
+      return;
+    }
     this->col_major = col_major_;
   }
 
