@@ -842,6 +842,7 @@ void sptrsv_supernodal_symbolic(
   handleU->set_supernodes (nsuper, supercols_view, etree);
 
   if (handleL->get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DAG ||
+      handleL->get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC ||
       handleL->get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG) {
     // generate supernodal graphs for DAG scheduling
     auto supL = generate_supernodal_graph<host_graph_t> (!col_majorL, graphL_host, nsuper, supercols);

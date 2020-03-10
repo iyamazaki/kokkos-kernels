@@ -648,6 +648,11 @@ public:
   void set_sptrsv_num_streams (int num_streams_) {
     this->sptrsvHandle->setNumStreams(num_streams_);
   }
+
+  void set_sptrsv_num_cores(size_type num_cores_) {
+    this->sptrsvHandle->set_num_cores(num_cores_);
+  }
+
 #endif
   void destroy_sptrsv_handle(){
     if (is_owner_of_the_sptrsv_handle && this->sptrsvHandle != nullptr)

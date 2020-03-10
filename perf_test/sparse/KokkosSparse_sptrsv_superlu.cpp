@@ -72,7 +72,7 @@ using namespace KokkosSparse;
 using namespace KokkosSparse::Experimental;
 using namespace KokkosSparse::PerfTest::Experimental;
 
-enum {CUSPARSE, SUPERNODAL_NAIVE, SUPERNODAL_ETREE, SUPERNODAL_DAG, SUPERNODAL_SPMV, SUPERNODAL_SPMV_DAG};
+enum {CUSPARSE, SUPERNODAL_NAIVE, SUPERNODAL_ETREE, SUPERNODAL_DAG, SUPERNODAL_SPMV, SUPERNODAL_SPMV_DAG, SUPERNODAL_DYNAMIC};
 
 
 /* ========================================================================================= */
@@ -254,7 +254,7 @@ void free_superlu (SuperMatrix &L, SuperMatrix &U,
 template<typename scalar_type>
 int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filename, bool symm_mode, bool metis, bool merge,
                       bool invert_diag, bool invert_offdiag, bool u_in_csr, int panel_size, int relax_size,
-                      int block_size, int num_streams, int loop) {
+                      int block_size, int num_streams, int num_cores, int loop) {
 
   using ordinal_type = int;
   using size_type    = int;
@@ -337,6 +337,7 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
         case SUPERNODAL_DAG:
         case SUPERNODAL_SPMV:
         case SUPERNODAL_SPMV_DAG:
+        case SUPERNODAL_DYNAMIC:
         {
           // ==============================================
           // create an handle
@@ -360,6 +361,10 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
             std::cout << " > create handle for SUPERNODAL_SPMV_DAG" << std::endl << std::endl;
             khL.create_sptrsv_handle (SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG, nrows, true);
             khU.create_sptrsv_handle (SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG, nrows, false);
+          } else if (test == SUPERNODAL_DYNAMIC) {
+            std::cout << " > create handle for SUPERNODAL_DYNAMIC" << std::endl << std::endl;
+            khL.create_sptrsv_handle (SPTRSVAlgorithm::SUPERNODAL_DYNAMIC, nrows, true);
+            khU.create_sptrsv_handle (SPTRSVAlgorithm::SUPERNODAL_DAG, nrows, false);
           }
           khU.set_sptrsv_unit_diagonal (false);
           khL.set_sptrsv_unit_diagonal (true);
@@ -405,6 +410,13 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
             khU.set_sptrsv_diag_supernode_sizes (block_size, block_size);
           }
 
+          //if (num_cores > 0) 
+          {
+            std::cout << " Number of Cores    : " << num_cores << std::endl;
+            khL.set_sptrsv_num_cores (num_cores);
+            khU.set_sptrsv_num_cores (num_cores);
+          }
+
           // set number of streams
           std::cout << " Number of Streams  : " << num_streams << std::endl;
           std::cout << "=============================== " << std::endl << std::endl;
@@ -430,9 +442,9 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string &filenam
           // Preaparing for the first solve
           //> create the known solution and set to all 1's ** on host **
           host_scalar_view_t sol_host ("sol_host", nrows);
-          //Kokkos::deep_copy (sol_host, ONE);
-          Kokkos::Random_XorShift64_Pool<host_execution_space> random(13718);
-          Kokkos::fill_random(sol_host, random, scalar_type(1));
+          Kokkos::deep_copy (sol_host, ONE);
+          //Kokkos::Random_XorShift64_Pool<host_execution_space> random(13718);
+          //Kokkos::fill_random(sol_host, random, scalar_type(1));
 
           // > create the rhs ** on host **
           // A*sol generates rhs: rhs is dense, use spmv
@@ -641,6 +653,8 @@ int main(int argc, char **argv) {
   int block_size  = 0;
   // number of streams
   int num_streams = 1;
+  // number of cores
+  int num_cores = 0;
   // verbose
   bool verbose = true;
 
@@ -663,6 +677,8 @@ int main(int argc, char **argv) {
         tests.push_back( SUPERNODAL_SPMV );
       } else if((strcmp(argv[i],"superlu-spmv-dag")==0)) {
         tests.push_back( SUPERNODAL_SPMV_DAG );
+      } else if((strcmp(argv[i],"superlu-dynamic")==0)) {
+        tests.push_back( SUPERNODAL_DYNAMIC );
       } else if((strcmp(argv[i],"cusparse")==0)) {
         tests.push_back( CUSPARSE );
       } else {
@@ -723,6 +739,10 @@ int main(int argc, char **argv) {
       num_streams = atoi(argv[++i]);
       continue;
     }
+    if((strcmp(argv[i],"--num-cores")==0)) {
+      num_cores = atoi(argv[++i]);
+      continue;
+    }
     if((strcmp(argv[i],"--help")==0) || (strcmp(argv[i],"-h")==0)) {
       print_help_sptrsv();
       return 0;
@@ -759,7 +779,7 @@ int main(int argc, char **argv) {
 
   int total_errors = test_sptrsv_perf<scalar_t> (tests, verbose, filename, symm_mode, metis, merge,
                                                  invert_diag,  invert_offdiag, u_in_csr, panel_size, relax_size,
-                                                 block_size, num_streams, loop);
+                                                 block_size, num_streams, num_cores, loop);
   if(total_errors == 0)
     std::cout << "Kokkos::SPTRSV Test: Passed " << scalarTypeString
               << std::endl << std::endl;

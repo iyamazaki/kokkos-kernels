@@ -685,7 +685,6 @@ struct SparseTriSupernodalSpMVFunctor
   }
 };
 
-
 // -----------------------------------------------------------
 // Functor for Lower-triangular solve
 template <class ColptrView, class RowindType, class ValuesType, class LHSType, class NGBLType>
@@ -724,7 +723,9 @@ struct LowerTriSupernodalFunctor
   NGBLType nodes_grouped_by_level;
 
   long node_count;
-  long node_groups;
+
+  // default constructor
+  LowerTriSupernodalFunctor () {}
 
   // constructor
   LowerTriSupernodalFunctor (// supernode info
@@ -738,27 +739,26 @@ struct LowerTriSupernodalFunctor
                              const ValuesType &values_,
                              // options to pick kernel type
                              int level_,
-                             integer_view_t &kernel_type_,
-                             integer_view_t &diag_kernel_type_,
+                             const integer_view_t &kernel_type_,
+                             const integer_view_t &diag_kernel_type_,
                              // right-hand-side (input), solution (output)
-                             LHSType &X_,
+                             const LHSType &X_,
                              // workspace
-                             work_view_t work_,
-                             integer_view_t &work_offset_,
+                             const work_view_t work_,
+                             const integer_view_t &work_offset_,
                              //
                              const NGBLType &nodes_grouped_by_level_,
-                             long  node_count_,
-                             long  node_groups_ = 0) :
+                             long  node_count_) :
     unit_diagonal(unit_diagonal_), invert_diagonal(invert_diagonal_), invert_offdiagonal(invert_offdiagonal_),
     supercols(supercols_), colptr(colptr_), rowind(rowind_), values(values_),
     level(level_), kernel_type(kernel_type_), diag_kernel_type(diag_kernel_type_),
     X(X_), work(work_), work_offset(work_offset_),
-    nodes_grouped_by_level(nodes_grouped_by_level_), node_count(node_count_), node_groups(node_groups_) {
+    nodes_grouped_by_level(nodes_grouped_by_level_), node_count(node_count_) {
   }
 
   // operator
   KOKKOS_INLINE_FUNCTION
-  void operator()(const member_type & team) const {
+  void apply(const member_type & team, const long node_count_) const {
     /* ---------------------------------------------------------------------- */
     /* get inputs */
     /* ---------------------------------------------------------------------- */
@@ -768,7 +768,7 @@ struct LowerTriSupernodalFunctor
     const scalar_t zero (0.0);
     const scalar_t one (1.0);
 
-    auto s = nodes_grouped_by_level (node_count + league_rank);
+    auto s = nodes_grouped_by_level (node_count_ + league_rank);
 
     // supernodal column size
     int j1 = supercols[s];
@@ -778,7 +778,14 @@ struct LowerTriSupernodalFunctor
     int i1 = colptr (j1);
     int i2 = colptr (j1+1);
     int nsrow  = i2 - i1;       // "total" number of rows in all the supernodes (diagonal+off-diagonal)
-    int nsrow2 = nsrow - nscol; // "total" number of rows in all the off-diagonal supernodes
+//char filename[200];
+//sprintf(filename,"output%d.dat",league_rank);
+//FILE *fp = fopen(filename,"a");
+//fprintf(fp, " > level       = %d\n", level);
+//fprintf(fp, " > node_cout   = %d\n", (int)node_count_);
+//fprintf(fp, " > league_rank = %d\n", league_rank);
+//fprintf(fp, " > team_size   = %d\n", team_size);
+//fprintf(fp, " > s           = %d (%dx%d)\n", s, nsrow,nscol);
 
     // create a view for the s-th supernocal column
     scalar_t *dataL = const_cast<scalar_t*> (values.data ());
@@ -854,6 +861,7 @@ struct LowerTriSupernodalFunctor
     }
 
     /* scatter vectors back into X */
+    int nsrow2 = nsrow - nscol; // "total" number of rows in all the off-diagonal supernodes
     int ps2 = i1 + nscol ;     // offset into rowind 
     Kokkos::View<scalar_t*, memory_space, Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::Atomic> > Xatomic(X.data(), X.extent(0));
     for (int ii = team_rank; ii < nsrow2; ii += team_size) {
@@ -861,6 +869,188 @@ struct LowerTriSupernodalFunctor
       Xatomic (i) -= Z (ii);
     }
     team.team_barrier();
+//fprintf(fp, " > done\n");
+//fclose(fp);
+  }
+
+
+  // operator
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const member_type & team) const {
+    apply(team, node_count);
+  }
+};
+
+
+// -----------------------------------------------------------
+// Functor for Lower-triangular solve with dynamic scheduling
+// > This functor should run on host, launching device kernels
+template <class ColptrView, class RowindType, class ValuesType, class LHSType, class NGBLType>
+struct LowerTriSupernodalDynamicFunctor
+{
+  using execution_space = typename LHSType::execution_space;
+  using memory_space = typename execution_space::memory_space;
+
+  using host_execution_space = Kokkos::DefaultHostExecutionSpace;
+  using host_memory_space = typename host_execution_space::memory_space;
+
+  using policy_type =  Kokkos::TeamPolicy<execution_space>;
+  using member_type = typename policy_type::member_type;
+
+  using lno_t = typename RowindType::non_const_value_type;
+  using scalar_t = typename ValuesType::non_const_value_type;
+
+  using work_view_t = typename Kokkos::View<scalar_t*, memory_space>;
+  using integer_view_t = Kokkos::View<int*, memory_space>;
+
+  using range_type = Kokkos::pair<int, int>;
+  using sptrsv_functor_type = LowerTriSupernodalFunctor<ColptrView, RowindType, ValuesType, LHSType, NGBLType>;
+
+  bool unit_diagonal;
+  bool invert_diagonal;
+  bool invert_offdiagonal;
+  const int *supercols;
+
+  integer_view_t task_ptr;
+  integer_view_t task_group;
+  integer_view_t task_count;
+
+  ColptrView dag_row_map;
+  RowindType dag_entries;
+
+  ColptrView colptr;
+  RowindType rowind;
+  ValuesType values;
+
+  integer_view_t kernel_type;
+  integer_view_t diag_kernel_type;
+
+  LHSType X;
+
+  work_view_t work; // needed with gemv for update&scatter
+  integer_view_t work_offset;
+  integer_view_t ready_work;
+
+  NGBLType nodes_grouped_by_level;
+
+  sptrsv_functor_type sptrsv_functor;
+
+  // constructor
+  LowerTriSupernodalDynamicFunctor (// supernode info
+                             const bool unit_diagonal_,
+                             const bool invert_diagonal_,
+                             const bool invert_offdiagonal_,
+                             const int *supercols_,
+                             // task groups
+                             const integer_view_t &task_ptr_,
+                             const integer_view_t &task_group_,
+                             const integer_view_t &task_count_,
+                             // DAG of supernodes
+                             const ColptrView &dag_row_map_,
+                             const RowindType &dag_entries_,
+                             // L in CSC 
+                             const ColptrView  &colptr_,
+                             const RowindType &rowind_,
+                             const ValuesType &values_,
+                             // options to pick kernel type
+                             integer_view_t &kernel_type_,
+                             integer_view_t &diag_kernel_type_,
+                             // right-hand-side (input), solution (output)
+                             LHSType &X_,
+                             // workspace
+                             work_view_t work_,
+                             integer_view_t &work_offset_,
+                             integer_view_t &ready_work_,
+                             //
+                             NGBLType &nodes_grouped_by_level_) :
+    unit_diagonal(unit_diagonal_), invert_diagonal(invert_diagonal_), invert_offdiagonal(invert_offdiagonal_),
+    supercols(supercols_), task_ptr(task_ptr_), task_group(task_group_), task_count(task_count_),
+    dag_row_map(dag_row_map_), dag_entries(dag_entries_), colptr(colptr_), rowind(rowind_), values(values_),
+    kernel_type(kernel_type_), diag_kernel_type(diag_kernel_type_),
+    X(X_), work(work_), work_offset(work_offset_), ready_work(ready_work_),
+    nodes_grouped_by_level(nodes_grouped_by_level_) {
+      //
+      int lvl = 0;
+      long node_count = 0;
+      sptrsv_functor = sptrsv_functor_type (unit_diagonal, invert_diagonal, invert_offdiagonal,
+                         supercols, colptr, rowind, values, lvl, kernel_type, diag_kernel_type, X,
+                         work, work_offset, ready_work, node_count);
+  }
+
+  // operator
+  //KOKKOS_INLINE_FUNCTION
+  //void operator()(const lno_t league_rank) const 
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const member_type & team) const
+  {
+    const int league_rank = team.league_rank (); // batch id
+    const int league_size = team.league_size (); // batch id
+
+    /* ---------------------------------------------------------------------- */
+    /* get inputs */
+    /* ---------------------------------------------------------------------- */
+    int j1 = task_ptr(league_rank);
+    int j2 = task_ptr(league_rank+1);
+    int num_tasks = j2 - j1;
+
+    const int team_size = team.team_size ();
+    const int team_rank = team.team_rank ();
+    int i1 = 2*league_rank;
+    int i2 = 2*league_size;
+    integer_view_t num_ready = Kokkos::subview (ready_work, range_type(i1+0, i1+1));
+    integer_view_t num_done  = Kokkos::subview (ready_work, range_type(i1+1, i1+2));
+    integer_view_t ready = Kokkos::subview (ready_work, range_type(i2+j1, i2+j2));
+
+    num_done (0) = 0;
+    Kokkos::View<int*, memory_space, Kokkos::MemoryTraits<Kokkos::Unmanaged | Kokkos::Atomic>> check(task_count.data(), task_count.extent(0));
+    while (num_done (0) < num_tasks) {
+      // find ready tasks
+//char filename[200];
+//sprintf(filename,"output%d.dat",league_rank);
+//FILE *fp = fopen(filename,"a");
+      if (team_rank == 0) {
+        num_ready(0) = 0;
+        for (int ii = j1; ii < j2; ii++) {
+          auto s = task_group (ii);
+          if (check (s) == 0) {
+            ready (num_ready(0)) = s;
+//fprintf(fp, " > ready (%d) = %d\n",num_ready(0),s );
+//printf(" %d: > ready (%d) = %d\n",league_rank,num_ready(0),s );
+            num_ready(0) ++;
+          }
+        }
+      }
+      team.team_barrier();
+//fclose(fp);
+
+      if (num_ready(0) > 0) {
+        // launching sparse-triangular solve functor
+        for (int ii = 0; ii < num_ready(0); ii++) {
+//fp = fopen(filename,"a");
+//fprintf(fp," %d: calling lower-tri\n",ii );
+//fclose(fp);
+          long  node_count_i = 2*league_size + j1 + ii - league_rank; // to shift back to 0 for accessing ready_i
+//printf(" %d:%d/%d: calling lower-tri (ready=%d, num_done=%d/%d, num_ready=%d)\n",     league_rank,team_rank,team_size,ready_work(node_count_i),num_done(0),num_tasks,num_ready(0));
+          sptrsv_functor.apply (team, node_count_i);
+          team.team_barrier();
+//printf(" %d:%d/%d: calling lower-tri (ready=%d, num_done=%d/%d, num_ready=%d) done\n",league_rank,team_rank,team_size,ready_work(node_count_i),num_done(0),num_tasks,num_ready(0));
+        }
+        // free the dependency
+        if (team_rank == 0) {
+          for (int ii = 0; ii < num_ready(0); ii++) {
+            auto s = ready (ii);
+            check (s) = -1;
+            //printf( " %d: check[%d]=%d ",level,s,check[s]);
+            for (auto e = dag_row_map (s); e < dag_row_map (s+1); e++) {
+              check (dag_entries (e)) --;
+            }
+          }
+          num_done(0) += num_ready(0);
+          //printf( "\n" );
+        }
+        team.team_barrier();
+      }
+    }
   }
 };
 
@@ -905,7 +1095,6 @@ struct UpperTriSupernodalFunctor
   NGBLType nodes_grouped_by_level;
 
   long node_count;
-  long node_groups;
 
   // constructor
   UpperTriSupernodalFunctor (// supernode info
@@ -927,13 +1116,12 @@ struct UpperTriSupernodalFunctor
                              integer_view_t &work_offset_,
                              //
                              const NGBLType &nodes_grouped_by_level_,
-                             long  node_count_,
-                             long  node_groups_ = 0) :
+                             long  node_count_) :
     unit_diagonal(unit_diagonal_), invert_diagonal(invert_diagonal_), supercols(supercols_),
     colptr(colptr_), rowind(rowind_), values(values_),
     level(level_), kernel_type(kernel_type_), diag_kernel_type(diag_kernel_type_),
     X(X_), work(work_), work_offset(work_offset_),
-    nodes_grouped_by_level(nodes_grouped_by_level_), node_count(node_count_), node_groups(node_groups_) {
+    nodes_grouped_by_level(nodes_grouped_by_level_), node_count(node_count_) {
   }
 
   // operator
@@ -1075,7 +1263,6 @@ struct UpperTriTranSupernodalFunctor
   NGBLType nodes_grouped_by_level;
 
   long node_count;
-  long node_groups;
 
   // constructor
   UpperTriTranSupernodalFunctor (// supernode info
@@ -1098,13 +1285,12 @@ struct UpperTriTranSupernodalFunctor
                                  integer_view_t &work_offset_,
                                  //
                                  const NGBLType &nodes_grouped_by_level_,
-                                 long  node_count_,
-                                 long  node_groups_ = 0) :
+                                 long  node_count_) :
     unit_diagonal(unit_diagonal_), invert_diagonal(invert_diagonal_), invert_offdiagonal(invert_offdiagonal_),
     supercols(supercols_), colptr(colptr_), rowind(rowind_), values(values_),
     level(level_), kernel_type(kernel_type_), diag_kernel_type(diag_kernel_type_),
     X(X_), work(work_), work_offset(work_offset_),
-    nodes_grouped_by_level(nodes_grouped_by_level_), node_count(node_count_), node_groups(node_groups_) {
+    nodes_grouped_by_level(nodes_grouped_by_level_), node_count(node_count_) {
   }
 
   // operator
@@ -2680,6 +2866,31 @@ void lower_tri_solve(TriSolveHandle & thandle, const RowMapType row_map, const E
 cudaProfilerStart();
 #endif
   size_type node_count = 0;
+if (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC) {
+  auto num_cores = thandle.get_num_cores ();
+  auto nsupers = thandle.get_num_supernodes ();
+  //
+  integer_view_t task_ptr = thandle.get_task_ptr ();
+  integer_view_t task_group = thandle.get_task_group ();
+  integer_view_t task_count = thandle.get_task_count ();
+  integer_view_t check ("ready", nsupers);
+  Kokkos::deep_copy (check, task_count);
+  //
+  auto dag = thandle.get_supernodal_dag_device ();
+  //auto dag = thandle.get_supernodal_dag ();
+  auto dag_row_map = dag.row_map;
+  auto dag_entries = dag.entries;
+
+  using team_policy_type = Kokkos::TeamPolicy<execution_space>;
+  integer_view_t ready_work ("ready_work", (2*num_cores)+nsupers);
+  LowerTriSupernodalDynamicFunctor<RowMapType, EntriesType, ValuesType, LHSType, NGBLType> 
+    sptrsv_dynamic_functor (unit_diagonal, invert_diagonal, invert_offdiagonal,
+                    supercols, task_ptr, task_group, check, dag_row_map, dag_entries,
+                    row_map, entries, values, kernel_type, diag_kernel_type, lhs,
+                    work, work_offset, ready_work, nodes_grouped_by_level);
+  Kokkos::parallel_for( "parfor_dynamic", team_policy_type(num_cores, Kokkos::AUTO), sptrsv_dynamic_functor );
+  //Kokkos::parallel_for( "parfor_dynamic", team_policy_type(num_cores, 10), sptrsv_dynamic_functor );
+} else {
   for ( size_type lvl = 0; lvl < nlevels; ++lvl ) {
    {
     size_type lvl_nodes = hnodes_per_level(lvl);
@@ -2949,6 +3160,7 @@ cudaProfilerStart();
    } // scope for if-block
 
   } // end for lvl
+}
 #if defined(KOKKOS_ENABLE_CUDA) && defined(KOKKOSPSTRSV_SOLVE_IMPL_PROFILE)
 cudaProfilerStop();
 #endif

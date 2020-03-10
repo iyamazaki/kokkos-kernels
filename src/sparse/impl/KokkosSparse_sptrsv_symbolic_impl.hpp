@@ -331,10 +331,11 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
 #endif
  }
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
- else if (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_NAIVE ||
-          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_ETREE ||
-          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DAG   ||
-          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV  ||
+ else if (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_NAIVE   ||
+          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_ETREE   ||
+          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DAG     ||
+          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC ||
+          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV    ||
           thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG) {
 
   using size_type = typename TriSolveHandle::size_type;
@@ -424,6 +425,7 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
     auto dag_row_map = dag.row_map;
     auto dag_entries = dag.entries;
     bool use_dag = (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DAG ||
+                    thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC ||
                     thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG);
     for (size_type s = 0; s < nsuper; s++) {
       if (use_dag) {
@@ -436,7 +438,10 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
         }
       }
     }
+    integer_view_t task_count = thandle.get_task_count ();
+    Kokkos::deep_copy (task_count, check);
 
+    signed_integral_t max_num_leaves = 0;
     signed_integral_t num_done = 0;
     signed_integral_t level = 0;
     //#define profile_supernodal_etree
@@ -475,7 +480,6 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
           size_type row = supercols[s];
           signed_integral_t nsrow = row_map (row+1) - row_map(row);
           lwork += nsrow;
-          //printf( " %d %d %d %d %d\n",num_done+num_leave, level, nsrow, supercols[s+1]-supercols[s],s );
           //for (int i = supercols[s]; i < supercols[s+1]; i++) printf("%d %d %d\n",i,s,level );  // permute matrix based on scheduling
 
           // total supernode size
@@ -515,6 +519,9 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
       }
       if (lwork > max_lwork) {
         max_lwork = lwork;
+      }
+      if (max_num_leaves < num_leave) {
+        max_num_leaves = num_leave;
       }
 
       // average supernode size at this level
@@ -562,7 +569,9 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
         if (use_dag) {
           for (size_type e = dag_row_map (s); e < dag_row_map (s+1); e++) {
             check (dag_entries (e)) --;
+            //printf( " -> check[%d]=%d",dag_entries(e),check (dag_entries(e)));
           }
+          //printf( "\n" );
         } else {
           if (parents[s] >= 0) {
             check (parents[s]) --;
@@ -584,6 +593,86 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
     #endif
     // Set number of level equal to be the number of supernodal columns
     thandle.set_num_levels (level);
+  
+    // Now construct data needed for dynamic scheduling (Currently supported only with DAG)
+    if (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC) {
+      // create task groups for each core
+      // > creater poionter 
+      size_type num_cores = thandle.get_num_cores ();
+      if (num_cores <= 0 || num_cores > max_num_leaves) {
+        std::cout << "   ** reset num_cores to be " << max_num_leaves << " from " << num_cores << std::endl;
+        thandle.set_num_cores (max_num_leaves);
+        num_cores = max_num_leaves;
+      }
+
+      integer_view_t task_group_d = thandle.get_task_group ();
+      integer_view_t task_ptr_d = thandle.get_task_ptr ();
+
+      auto task_group = Kokkos::create_mirror_view (task_group_d);
+      auto task_ptr = Kokkos::create_mirror_view (task_ptr_d);
+      Kokkos::deep_copy (task_ptr, 0);
+
+      auto hnodes_per_level = thandle.get_host_nodes_per_level();
+      auto nodes_grouped_by_level_host = Kokkos::create_mirror_view (nodes_grouped_by_level);
+      Kokkos::deep_copy (nodes_grouped_by_level_host, nodes_grouped_by_level);
+
+      size_type total_num_tasks = 0;
+      integer_view_host_t lwork_per_core ("lwork", num_cores+1);
+      Kokkos::deep_copy (lwork_per_core, 0);
+      for (size_type l = 0; l < level; ++l) {
+        size_type num_tasks = hnodes_per_level (l); 
+        for (size_type c = 0; c < num_cores; c++) {
+          task_ptr (1+c) += num_tasks/num_cores;
+          if (c < num_tasks%num_cores) {
+            task_ptr (1+c) ++;
+          }
+        }
+        // compute max workspace
+        for (size_type t = 0; t < num_tasks; t++) {
+          size_type core_id = t % num_cores;
+          auto s = nodes_grouped_by_level_host (total_num_tasks + t);
+          size_type row = supercols[s];
+          signed_integral_t nsrow = row_map (row+1) - row_map(row);
+          if (nsrow > lwork_per_core (core_id+1)) {
+            lwork_per_core (core_id+1) = nsrow;
+          }
+        }
+        total_num_tasks += num_tasks;
+      }
+      max_lwork = 0;
+      for (size_type c = 0; c < num_cores; c++) {
+        //std::cout << " -- task_ptr ( " << 1+c << " )= " << task_ptr (1+c) << std::endl;
+        max_lwork += lwork_per_core (1+c);
+        lwork_per_core (1+c) += lwork_per_core (c);
+        task_ptr (1+c) += task_ptr (c);
+      }
+      // > store task group
+      total_num_tasks = 0;
+      for (size_type l = 0; l < level; ++l) {
+        size_type num_tasks = hnodes_per_level(l); 
+        for (size_type t = 0; t < num_tasks; t++) {
+          auto s = nodes_grouped_by_level_host (total_num_tasks + t);
+          size_type core_id = t % num_cores;
+          // let each has its own workspace (currently one gemv at at time)
+          work_offset_host (s) = lwork_per_core (core_id);
+          task_group (task_ptr (core_id)) = s;
+          //std::cout << "  ** task_group = ( " << task_ptr (core_id) << " ) = " << s << std::endl;
+          task_ptr (core_id) ++;
+        }
+        total_num_tasks += num_tasks;
+      }
+      for (size_type c = num_cores; c > 0; c--) {
+        task_ptr (c) = task_ptr (c-1);
+      }
+      task_ptr (0) = 0;
+
+      // NOTE: not supporting device-call, yet
+      Kokkos::deep_copy (kernel_type_by_level, 0);
+      Kokkos::deep_copy (diag_kernel_type_by_level, 0);
+
+      Kokkos::deep_copy (task_ptr_d, task_ptr);
+      Kokkos::deep_copy (task_group_d, task_group);
+    } // end of if dynamic
   }
   // workspace size
   if (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV  ||
@@ -772,10 +861,11 @@ void upper_tri_symbolic ( TriSolveHandle &thandle, const RowMapType drow_map, co
 #endif
  }
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
- else if (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_NAIVE ||
-          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_ETREE ||
-          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DAG ||
-          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV ||
+ else if (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_NAIVE   ||
+          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_ETREE   ||
+          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DAG     ||
+          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC ||
+          thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV    ||
           thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG) {
 
   using size_type = typename TriSolveHandle::size_type;
@@ -862,6 +952,7 @@ void upper_tri_symbolic ( TriSolveHandle &thandle, const RowMapType drow_map, co
     auto dag_row_map = dag.row_map;
     auto dag_entries = dag.entries;
     bool use_dag = (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DAG ||
+                    thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC ||
                     thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG);
     if (use_dag) {
       for (size_type s = 0; s < nsuper; s++) {

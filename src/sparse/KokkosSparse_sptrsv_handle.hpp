@@ -72,7 +72,7 @@ namespace KokkosSparse {
 namespace Experimental {
 
 // TODO TP2 algorithm had issues with some offset-ordinal combo to be addressed when compiled in Trilinos...
-enum class SPTRSVAlgorithm { SEQLVLSCHD_RP, SEQLVLSCHD_TP1/*, SEQLVLSCHED_TP2*/, SEQLVLSCHD_TP1CHAIN, SPTRSV_CUSPARSE, SUPERNODAL_NAIVE, SUPERNODAL_ETREE, SUPERNODAL_DAG, SUPERNODAL_SPMV, SUPERNODAL_SPMV_DAG };
+enum class SPTRSVAlgorithm { SEQLVLSCHD_RP, SEQLVLSCHD_TP1/*, SEQLVLSCHED_TP2*/, SEQLVLSCHD_TP1CHAIN, SPTRSV_CUSPARSE, SUPERNODAL_NAIVE, SUPERNODAL_ETREE, SUPERNODAL_DAG, SUPERNODAL_SPMV, SUPERNODAL_SPMV_DAG, SUPERNODAL_DYNAMIC };
 
 template <class size_type_, class lno_t_, class scalar_t_,
           class ExecutionSpace,
@@ -288,6 +288,7 @@ private:
         || algm == SPTRSVAlgorithm::SUPERNODAL_NAIVE
         || algm == SPTRSVAlgorithm::SUPERNODAL_ETREE
         || algm == SPTRSVAlgorithm::SUPERNODAL_DAG
+        || algm == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC
         || algm == SPTRSVAlgorithm::SUPERNODAL_SPMV
         || algm == SPTRSVAlgorithm::SUPERNODAL_SPMV_DAG
 #endif
@@ -331,6 +332,7 @@ private:
 
   // dag
   host_graph_t dag_host;
+  graph_t      dag;
 
   // map from supernode to column id, i.e., superdols[s] = the first column id of s-th supernode
   integer_view_host_t supercols_host; // on the host
@@ -373,6 +375,12 @@ private:
   bool spmv_trans;
   crsmat_list_t sub_crsmats;
   crsmat_list_t diag_blocks;
+
+  // number of cores, for dynamic scheduling
+  int num_cores;
+  integer_view_t task_count;
+  integer_view_t task_ptr;
+  integer_view_t task_group;
 
   // streams
   size_type num_streams;
@@ -426,6 +434,7 @@ public:
     , sup_size_blocked (200)
     , perm_avail (false)
     , spmv_trans (true)
+    , num_cores (1)
     , num_streams (0)
     , verbose (false)
 #endif
@@ -481,11 +490,29 @@ public:
     this->diag_kernel_type = integer_view_t ("diag_kernel_type", nsuper_);
     this->kernel_type_host = integer_view_host_t ("kernel_type_host", nsuper_);
     this->kernel_type = integer_view_t ("kernel_type", nsuper_);
+
+    // for dynamic scheduling
+    this->task_ptr   = integer_view_t ("task_ptr", 1+nsuper_);
+    this->task_group = integer_view_t ("task_group", nsuper_);
+    this->task_count = integer_view_t ("task_count", nsuper_);
   }
 
   // set supernodal dag
   void set_supernodal_dag (host_graph_t dag_) {
     this->dag_host = dag_;
+
+
+    if (algm == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC) {
+      auto dag_row_map_host = dag_.row_map;
+      auto dag_entries_host = dag_.entries;
+      nnz_row_view_t dag_row_map ("dag_row_map", nsuper+1);
+      nnz_lno_view_t dag_entries ("dag_entries", dag_row_map_host (nsuper));
+      Kokkos::deep_copy (dag_row_map, dag_row_map_host);
+      Kokkos::deep_copy (dag_entries, dag_entries_host);
+
+      graph_t static_graph (dag_entries, dag_row_map);
+      this->dag = static_graph;
+    }
   }
 
   // return number of supernodes
@@ -510,6 +537,9 @@ public:
   // return parents info in etree of supernodes
   host_graph_t get_supernodal_dag () {
     return this->dag_host;
+  }
+  graph_t get_supernodal_dag_device () {
+    return this->dag;
   }
 
   // workspace size
@@ -728,6 +758,24 @@ public:
   // verbose
   void set_verbose (bool verbose_) {
     this->verbose = verbose_;
+  }
+
+  // dynamic scheduling
+  size_type get_num_cores() {
+    return num_cores;
+  }
+  void set_num_cores(size_type num_cores_) {
+    num_cores = num_cores_;
+  }
+
+  integer_view_t get_task_count () {
+    return this->task_count;
+  }
+  integer_view_t get_task_group () {
+    return this->task_group;
+  }
+  integer_view_t get_task_ptr () {
+    return this->task_ptr;
   }
 
   // streams
