@@ -597,6 +597,10 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
     // Now construct data needed for dynamic scheduling (Currently supported only with DAG)
     if (thandle.get_algorithm () == SPTRSVAlgorithm::SUPERNODAL_DYNAMIC) {
       // create task groups for each core
+      // NOTE: not supporting device-call, yet
+      //Kokkos::deep_copy (kernel_type_by_level, 0);
+      //Kokkos::deep_copy (diag_kernel_type_by_level, 0);
+
       // > creater poionter 
       size_type num_cores = thandle.get_num_cores ();
       if (num_cores <= 0 || num_cores > max_num_leaves) {
@@ -616,48 +620,87 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
       auto nodes_grouped_by_level_host = Kokkos::create_mirror_view (nodes_grouped_by_level);
       Kokkos::deep_copy (nodes_grouped_by_level_host, nodes_grouped_by_level);
 
+      max_lwork = 0;
+      size_type lwork_per_level = 0;
       size_type total_num_tasks = 0;
       integer_view_host_t lwork_per_core ("lwork", num_cores+1);
       Kokkos::deep_copy (lwork_per_core, 0);
       for (size_type l = 0; l < level; ++l) {
         size_type num_tasks = hnodes_per_level (l); 
-        for (size_type c = 0; c < num_cores; c++) {
-          task_ptr (1+c) += num_tasks/num_cores;
-          if (c < num_tasks%num_cores) {
-            task_ptr (1+c) ++;
+        if (diag_kernel_type_by_level (l) == 3) {
+          // store the switch point to device-level kernels
+          if (thandle.get_device_level () == -1) { // if have not initialized
+            thandle.set_device_level (l);
+            thandle.set_device_node (total_num_tasks);
+          }
+        } else {
+          // tasks are assigned round-robin
+          for (size_type c = 0; c < num_cores; c++) {
+            task_ptr (1+c) += num_tasks/num_cores;
+            if (c < num_tasks%num_cores) {
+              task_ptr (1+c) ++;
+            }
           }
         }
         // compute max workspace
+        lwork_per_level = 0;
         for (size_type t = 0; t < num_tasks; t++) {
           size_type core_id = t % num_cores;
           auto s = nodes_grouped_by_level_host (total_num_tasks + t);
           size_type row = supercols[s];
           signed_integral_t nsrow = row_map (row+1) - row_map(row);
-          if (nsrow > lwork_per_core (core_id+1)) {
-            lwork_per_core (core_id+1) = nsrow;
+          if (diag_kernel_type_by_level (l) == 3) {
+            // for device call, just sum of nsrows per level (could be per steams)
+            lwork_per_level += nsrow;
+          } else {
+            // looking for largest nsrow per "core" or "team"
+            if (nsrow > lwork_per_core (core_id+1)) {
+              lwork_per_core (core_id+1) = nsrow;
+            }
           }
+        }
+        if (diag_kernel_type_by_level (l) == 3 && max_lwork < lwork_per_level) {
+          max_lwork = lwork_per_level;
         }
         total_num_tasks += num_tasks;
       }
-      max_lwork = 0;
+      if (thandle.get_device_level () == -1) { // if have not initialized, no device-level calls
+        thandle.set_device_level (level);
+        thandle.set_device_node (total_num_tasks);
+      }
+
+      lwork_per_level = 0;
       for (size_type c = 0; c < num_cores; c++) {
         //std::cout << " -- task_ptr ( " << 1+c << " )= " << task_ptr (1+c) << std::endl;
-        max_lwork += lwork_per_core (1+c);
+        lwork_per_level += lwork_per_core (1+c);
         lwork_per_core (1+c) += lwork_per_core (c);
         task_ptr (1+c) += task_ptr (c);
       }
+      if (max_lwork < lwork_per_level) {
+        max_lwork = lwork_per_level;
+      }
+
       // > store task group
       total_num_tasks = 0;
       for (size_type l = 0; l < level; ++l) {
+        lwork_per_level = 0;
         size_type num_tasks = hnodes_per_level(l); 
         for (size_type t = 0; t < num_tasks; t++) {
           auto s = nodes_grouped_by_level_host (total_num_tasks + t);
           size_type core_id = t % num_cores;
           // let each has its own workspace (currently one gemv at at time)
-          work_offset_host (s) = lwork_per_core (core_id);
-          task_group (task_ptr (core_id)) = s;
-          //std::cout << "  ** task_group = ( " << task_ptr (core_id) << " ) = " << s << std::endl;
-          task_ptr (core_id) ++;
+          if (diag_kernel_type_by_level (l) == 3) {
+            work_offset_host (s) = lwork_per_level;
+
+            size_type row = supercols[s];
+            signed_integral_t nsrow = row_map (row+1) - row_map(row);
+            lwork_per_level += nsrow;
+          } else {
+            work_offset_host (s) = lwork_per_core (core_id);
+            task_group (task_ptr (core_id)) = s;
+            //std::cout << "  ** task_group = ( " << task_ptr (core_id) << " ) = " << s << std::endl;
+            task_ptr (core_id) ++;
+          }
         }
         total_num_tasks += num_tasks;
       }
@@ -665,10 +708,6 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
         task_ptr (c) = task_ptr (c-1);
       }
       task_ptr (0) = 0;
-
-      // NOTE: not supporting device-call, yet
-      Kokkos::deep_copy (kernel_type_by_level, 0);
-      Kokkos::deep_copy (diag_kernel_type_by_level, 0);
 
       Kokkos::deep_copy (task_ptr_d, task_ptr);
       Kokkos::deep_copy (task_group_d, task_group);

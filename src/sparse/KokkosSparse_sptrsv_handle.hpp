@@ -378,6 +378,8 @@ private:
 
   // number of cores, for dynamic scheduling
   int num_cores;
+  int device_level;
+  int device_node;
   integer_view_t task_count;
   integer_view_t task_ptr;
   integer_view_t task_group;
@@ -435,6 +437,8 @@ public:
     , perm_avail (false)
     , spmv_trans (true)
     , num_cores (1)
+    , device_level (-1)
+    , device_node (-1)
     , num_streams (0)
     , verbose (false)
 #endif
@@ -766,6 +770,20 @@ public:
   }
   void set_num_cores(size_type num_cores_) {
     num_cores = num_cores_;
+  }
+
+  size_type get_device_level() {
+    return device_level;
+  }
+  void set_device_level(size_type device_level_) {
+    device_level = device_level_;
+  }
+
+  size_type get_device_node() {
+    return device_node;
+  }
+  void set_device_node(size_type device_node_) {
+    device_node = device_node_;
   }
 
   integer_view_t get_task_count () {
