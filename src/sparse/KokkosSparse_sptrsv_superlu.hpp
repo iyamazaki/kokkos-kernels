@@ -80,7 +80,11 @@ graph_t read_superlu_graphL(KernelHandle *kernelHandleL, SuperMatrix *L) {
   int * rowind = Lstore->rowind;
 
   bool ptr_by_column = true;
-  return read_supernodal_graphL<graph_t> (kernelHandleL, n, nsuper, ptr_by_column, mb, nb, colptr, rowind);
+  auto *handle = kernelHandleL->get_sptrsv_handle ();
+  if (handle->is_column_major ()) {
+    return read_supernodal_graphL<graph_t> (kernelHandleL, n, nsuper, ptr_by_column, mb, nb, colptr, rowind);
+  }
+  return read_supernodal_graphLt<graph_t> (kernelHandleL, n, nsuper, ptr_by_column, mb, nb, colptr, rowind);
 }
 
 
@@ -347,9 +351,15 @@ crsmat_t read_superlu_valuesL(KernelHandle kernelHandle, SuperMatrix *L, graph_t
   int * rowind = Lstore->rowind;
 
   bool ptr_by_column = true;
-  return read_supernodal_valuesL<crsmat_t, graph_t> (kernelHandle,
-                                                     n, nsuper, ptr_by_column, mb, nb,
-                                                     colptr, rowind, Lx, static_graph);
+  auto *handle = kernelHandle->get_sptrsv_handle ();
+  if (handle->is_column_major ()) {
+    return read_supernodal_valuesL<crsmat_t, graph_t> (kernelHandle,
+                                                       n, nsuper, ptr_by_column, mb, nb,
+                                                       colptr, rowind, Lx, static_graph);
+  }
+  return read_supernodal_valuesLt<crsmat_t, graph_t> (kernelHandle,
+                                                      n, nsuper, ptr_by_column, mb, nb,
+                                                      colptr, rowind, Lx, static_graph);
 }
 
 
