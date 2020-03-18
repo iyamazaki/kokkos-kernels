@@ -144,9 +144,13 @@ graph_t read_superlu_graphU(KernelHandle kernelHandle, SuperMatrix *L,  SuperMat
     // TODO: should take unions of nonzero columns per block row
     int nsup = 0;
     for (int jcol = j1; jcol < j1 + nscol; jcol++) {
+//std::cout << " > " << k << ": Jcol=" << jcol << ": " << colptrU[jcol] << ":" << colptrU[jcol+1] << std::endl;
       for (int i = colptrU[jcol]; i < colptrU[jcol+1]; i++ ){
         int irow = rowindU[i];
         supid = map (irow);
+//std::cout << i << " supid = map(" << irow << ")=" << supid << "(" << n<< "," << nsuper <<")" << std::endl;
+//std::cout << i << " check (" << supid << ")=";
+//std::cout << check(supid) << std::endl;
         if (check (supid) == 0) {
           if (u_in_csc) {
             int nsrow = nb[supid+1] - nb[supid];
@@ -652,6 +656,58 @@ void sptrsv_compute(
     std::cout << "   > copy U to device: " << timeU << std::endl;
     #endif
   }
+#if 1
+{
+  // remove empty rows
+  auto graph = superluU.graph;
+  auto row_map = graph.row_map;
+  auto entries = graph.entries;
+  auto values = superluU.values;
+
+  int n = graph.numRows ();
+  int nnzOld = row_map (n);
+  using host_graph_t = typename host_crsmat_t::StaticCrsGraphType;
+  using   row_map_view_t = typename host_graph_t::row_map_type::non_const_type;
+  using      cols_view_t = typename host_graph_t::entries_type::non_const_type;
+  using values_view_t = typename host_crsmat_t::values_type::non_const_type;
+
+  row_map_view_t row_map2 ("rowmap_view", n+1);
+  cols_view_t    entries2 ("colmap_view", nnzOld);
+  values_view_t  values2  ("values_view", nnzOld);
+  cols_view_t    check ("check", n);
+
+  int nnz = 0;
+  row_map2 (0) = 0;
+  for (int s = 0; s < nsuper; s++) {
+    int j1 = supercols [s];
+    int j2 = supercols [s+1];
+
+    // look for non empty rows
+    Kokkos::deep_copy (check, 0);
+    for (int j = j1; j < j2; j++) {
+      for (int k = row_map (j); k < row_map (j+1); k++) {
+        if (values (k) != 0.0) {
+          check(entries(k)) = 1;
+        }
+      }
+    }
+    // compress
+    for (int j = j1; j < j2; j++) {
+      for (int k = row_map (j); k < row_map (j+1); k++) {
+        if (check (entries(k)) != 0) {
+          entries2 (nnz) = entries(k);
+          values2 (nnz) = values(k);
+          nnz ++;
+        }
+      }
+      row_map2 (j+1) = nnz;
+    }
+  }
+  host_graph_t static_graph (entries2, row_map2);
+  superluU = crsmat_t("CrsMatrix", n, values2, static_graph);
+  std::cout << " REmoving empty rows from U " << nnzOld << " -> " << nnz << std::endl;
+}
+#endif
 
   // ===================================================================
   if (useSpMV) {
