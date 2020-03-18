@@ -2707,7 +2707,7 @@ void lower_tri_solve(TriSolveHandle & thandle, const RowMapType row_map, const E
 #endif
 
   // create execution streams
-  //#define SPTRSV_WITH_STREAMS
+  #define SPTRSV_WITH_STREAMS
   #if defined(SPTRSV_WITH_STREAMS)
   const size_type num_streams = thandle.getNumStreams ();
   auto streams = thandle.getStreams ();
@@ -3130,6 +3130,10 @@ void upper_tri_solve(TriSolveHandle & thandle, const RowMapType row_map, const E
 #endif
 
   size_type node_count = 0;
+  #if defined(SPTRSV_WITH_STREAMS)
+  const size_type num_streams = thandle.getNumStreams ();
+  auto streams = thandle.getStreams ();
+  #endif
 
   // This must stay serial; would be nice to try out Cuda's graph stuff to reduce kernel launch overhead
 #if defined(KOKKOS_ENABLE_CUDA) && defined(KOKKOSPSTRSV_SOLVE_IMPL_PROFILE)
@@ -3239,10 +3243,25 @@ void upper_tri_solve(TriSolveHandle & thandle, const RowMapType row_map, const E
                 auto Uij = Kokkos::subview (viewU, range_type (0, nsrow), Kokkos::ALL ());
                 auto Xj = Kokkos::subview (lhs, range_type(j1, j2));
                 auto Z = Kokkos::subview (work, range_type(workoffset, workoffset+nsrow));  // needed with gemv for update&scatter
+                #if defined(SPTRSV_WITH_STREAMS)
+                if (num_streams > 0) {
+                  KokkosBlas::
+                  gemv ("N", one, Uij,
+                                  Xj,
+                            zero, Z,
+                        streams [league_rank % num_streams]);
+                } else {
+                  KokkosBlas::
+                  gemv("N", one,  Uij,
+                                  Xj,
+                            zero, Z);
+                }
+                #else
                 KokkosBlas::
                 gemv("N", one,  Uij,
                                 Xj,
                           zero, Z);
+                #endif
                 //auto Y = Kokkos::subview (work, range_type(workoffset, workoffset+nscol));  // needed for gemv instead of trmv/trsv
                 //Kokkos::deep_copy(Xj, Y);
               } else {
@@ -3278,6 +3297,9 @@ void upper_tri_solve(TriSolveHandle & thandle, const RowMapType row_map, const E
                 }
               }
             }
+            #if defined(SPTRSV_WITH_STREAMS)
+            Kokkos::fence();
+            #endif
             if (invert_offdiagonal) {
               // copy diagonals from workspaces
               const int* work_offset_data = work_offset.data ();
