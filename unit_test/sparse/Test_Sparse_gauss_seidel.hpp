@@ -82,7 +82,8 @@ int run_gauss_seidel(
     int apply_type = 0, // 0 for symmetric, 1 for forward, 2 for backward.
     int cluster_size = 1,
     ClusteringAlgorithm cluster_algorithm = CLUSTER_DEFAULT,
-    bool classic = false) // only with two-stage, true for sptrsv instead of richardson
+    bool classic = false, // only with two-stage, true for sptrsv instead of richardson
+    bool sollution_base = true) // only with two-stage, true for solutino-based recurrense
 {
   typedef typename crsMat_t::StaticCrsGraphType graph_t;
   typedef typename graph_t::row_map_type lno_view_t;
@@ -106,6 +107,7 @@ int run_gauss_seidel(
     // test for two-stage/classical gs
     kh.create_gs_handle(gs_algorithm);
     kh.set_gs_twostage(!classic, input_mat.numRows());
+    kh.set_gs_solution_based(solution_based);
   }
   else
     kh.create_gs_handle(GS_DEFAULT);
@@ -320,6 +322,17 @@ void test_gauss_seidel_rank1(lno_t numRows, size_type nnz, lno_t bandwidth, lno_
     mag_t result_norm_res = KokkosBlas::nrm2(x_vector);
     EXPECT_LT(result_norm_res, initial_norm_res);
   }
+  //*** Two-stage version (classic, not solution-based recurrense) ****
+  for (int apply_type = 0; apply_type < apply_count; ++apply_type)
+  {
+    ClusteringAlgorithm cluster_algo = (ClusteringAlgorithm)0;
+    Kokkos::deep_copy(x_vector, zero);
+    run_gauss_seidel<crsMat_t, scalar_view_t, device>
+      (input_mat, GS_TWOSTAGE, x_vector, y_vector, symmetric, apply_type, 0, cluster_algo, true, false);
+    KokkosBlas::axpby(one, solution_x, -one, x_vector);
+    mag_t result_norm_res = KokkosBlas::nrm2(x_vector);
+    EXPECT_LT(result_norm_res, initial_norm_res);
+  }
 }
 
 template <typename scalar_t, typename lno_t, typename size_type, typename device>
@@ -439,6 +452,28 @@ void test_gauss_seidel_rank2(lno_t numRows, size_type nnz, lno_t bandwidth, lno_
     Kokkos::deep_copy(x_vector, zero);
     run_gauss_seidel<crsMat_t, scalar_view2d_t, device>
       (input_mat, GS_TWOSTAGE, x_vector, y_vector, symmetric, apply_type, 0, cluster_algo, true);
+    Kokkos::deep_copy(x_host, x_vector);
+    for(lno_t i = 0; i < numVecs; i++)
+    {
+      scalar_t diffDot = 0;
+      for(lno_t j = 0; j < numRows; j++)
+      {
+        scalar_t diff = x_host(j, i) - solution_x(j, i);
+        diffDot += diff * diff;
+      }
+      mag_t res = Kokkos::Details::ArithTraits<mag_t>::sqrt(
+          Kokkos::Details::ArithTraits<scalar_t>::abs(diffDot));
+      EXPECT_LT(res, initial_norms[i]);
+    }
+  }
+  //*** Two-stage version (classic, not solution-based recurrence) ****
+  for(int apply_type = 0; apply_type < apply_count; ++apply_type)
+  {
+    //Zero out X before solving
+    ClusteringAlgorithm cluster_algo = (ClusteringAlgorithm)0;
+    Kokkos::deep_copy(x_vector, zero);
+    run_gauss_seidel<crsMat_t, scalar_view2d_t, device>
+      (input_mat, GS_TWOSTAGE, x_vector, y_vector, symmetric, apply_type, 0, cluster_algo, true, false);
     Kokkos::deep_copy(x_host, x_vector);
     for(lno_t i = 0; i < numVecs; i++)
     {

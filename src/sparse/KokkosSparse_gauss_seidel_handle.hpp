@@ -654,6 +654,7 @@ namespace KokkosSparse{
     nrhs (1),
     direction (GS_SYMMETRIC),
     two_stage (true),
+    solution_based (true),
     num_inner_sweeps (1)
     {}
 
@@ -671,6 +672,14 @@ namespace KokkosSparse{
     }
     bool isTwoStage () {
       return this->two_stage;
+    }
+
+    // specify whether to perform inner sweeps
+    void setSolutionBased (bool solution_based_) {
+      this->solution_based = solution_based_;
+    }
+    bool isSolutionBased () {
+      return this->solution_based;
     }
 
     // Number of inner sweeps
@@ -703,6 +712,21 @@ namespace KokkosSparse{
       return this->crsmatU;
     }
 
+
+    void setMatL (crsmat_t L) {
+      this->crsMatL = L;
+    }
+    crsmat_t getMatL () {
+      return this->crsMatL;
+    }
+
+    void setMatU (crsmat_t U) {
+      this->crsMatU = U;
+    }
+    crsmat_t getMatU () {
+      return this->crsMatU;
+    }
+
     void initVectors (int nrows_, int nrhs_) {
       if (this->nrows != nrows_ || this->nrhs != nrhs_) {
         this->localR = vector_view_t ("temp", nrows_, nrhs_);
@@ -728,9 +752,13 @@ namespace KokkosSparse{
 
     // workspaces
     // > A = L + D + U
+    // used to apply (L+D)^{-1} or (U+D)^{-1}
     values_view_t D;
     crsmat_t crsmatL;
     crsmat_t crsmatU;
+    // used to compute residual b-L*x or b-U*x
+    crsmat_t crsMatL;
+    crsmat_t crsMatU;
 
     // > residual vector for outer GS, Rk = B-A*Xk
     vector_view_t localR;
@@ -741,7 +769,11 @@ namespace KokkosSparse{
 
     // solver parameters
     GSDirection direction;
+    // whether to use an iterative-solve, or sparse-triangular solve
     bool two_stage;
+    // whether X_{k+1} += (L+D)^{-1}(B - A*X_k), or X_{k+1} = (L+D)^{-1}(B - U*X_k)
+    bool solution_based;
+    // number of inner sweeps
     int num_inner_sweeps;
   };
   // -------------------------------------

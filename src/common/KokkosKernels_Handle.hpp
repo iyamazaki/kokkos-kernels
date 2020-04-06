@@ -586,6 +586,12 @@ public:
     gs2->setNumInnerSweeps (num_inner_sweeps);
   }
   // ---------------------------------------- //
+  // Specify if we use solution-based GS
+  void set_gs_solution_based (bool solution_based) {
+    auto gs2 = get_twostage_gs_handle();
+    gs2->setSolutionBased (solution_based);
+  }
+  // ---------------------------------------- //
   // Specify to use either Two-stage or Classical (i.e., inner Jacobi-Richardson or SpTrsv)
   void set_gs_twostage (bool two_stage, size_type nrows) {
     auto gs2 = get_twostage_gs_handle();
