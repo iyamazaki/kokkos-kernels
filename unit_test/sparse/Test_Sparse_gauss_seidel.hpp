@@ -83,7 +83,7 @@ int run_gauss_seidel(
     int cluster_size = 1,
     ClusteringAlgorithm cluster_algorithm = CLUSTER_DEFAULT,
     bool classic = false, // only with two-stage, true for sptrsv instead of richardson
-    bool sollution_base = true) // only with two-stage, true for solutino-based recurrense
+    bool solution_based = true) // only with two-stage, true for solutino-based recurrense
 {
   typedef typename crsMat_t::StaticCrsGraphType graph_t;
   typedef typename graph_t::row_map_type lno_view_t;
