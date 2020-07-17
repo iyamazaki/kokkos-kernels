@@ -210,6 +210,7 @@ read_supernodal_graphL(KernelHandle kernelHandle, int n, int nsuper, int nnzA, b
   }
   hr(0) = 0;
 
+  #define KOKKOS_SPTRSV_SUPERNODE_PROFILE
   #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
   std::cout << "    * Matrix size = " << n << std::endl;
   std::cout << "    * Total nnz   = " << hr (n) << std::endl;
@@ -1143,18 +1144,18 @@ void sptrsv_supernodal_symbolic(
     }
   };
 /* ========================================================================================= */
-template <typename KernelHandle, typename input_size_type,
+template <typename KernelHandle, typename input_size_type, typename row_map_host_type,
           typename row_map_type, typename index_type, typename values_type>
 void
 invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper, const input_size_type *nb, 
-                          row_map_type& hr, index_type& hc, values_type& hv) {
+                          row_map_host_type& hr_host, row_map_type& hr, index_type& hc, values_type& hv) {
 
   using execution_space = typename values_type::execution_space;
   using memory_space    = typename execution_space::memory_space;
   using values_view_t   = typename values_type::non_const_type;
   using scalar_t        = typename values_view_t::value_type;
   using range_type = Kokkos::pair<int, int>;
-  using integer_view_host_t = Kokkos::View<int*, Kokkos::HostSpace>;
+  using integer_view_t = Kokkos::View<int*, execution_space>;
 
   const scalar_t one (1.0);
 
@@ -1175,6 +1176,11 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
   double time1 = 0.0;
   double time2 = 0.0;
   double time3 = 0.0;
+  std::cout << std::endl;
+  std::cout << " invert_supernodal_columns( invert-diag=" << invert_diag 
+            << ", invert_offdiag=" << invert_offdiag << " )" <<std::endl;
+  std::cout << " > Execution space: " << execution_space::name () << std::endl;
+  std::cout << " > Memory space   : " << memory_space::name () << std::endl;
   #endif
 
   // ----------------------------------------------------------
@@ -1184,20 +1190,22 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
   // > to call batchedBlas on them
   int num_batchs = 0;
   int size_unblocked = handle->get_supernode_size_unblocked();
-  integer_view_host_t supernode_ids ("supernode_batch", nsuper);
+  scalar_t *dataL = const_cast<scalar_t*> (hv.data ());
+  integer_view_t supernode_ids ("supernode_batch", nsuper);
+  auto supernode_ids_host = Kokkos::create_mirror_view (supernode_ids);
   for (int s2 = 0; s2 < nsuper; s2++) {
     int nscol = nb[s2+1] - nb[s2];
 
     if (nscol >= size_unblocked) {
       int j1 = nb[s2];
-      int nsrow = hr(j1+1) - hr(j1);
+      int nsrow = hr_host(j1+1) - hr_host(j1);
 
-      auto nnzD = hr (j1);
+      auto nnzD = hr_host (j1);
       char uplo_char = (lower ? 'L' : 'U');
       char diag_char = (unit_diag ? 'U' : 'N');
 
       Kokkos::View<scalar_t**, Kokkos::LayoutLeft, memory_space, Kokkos::MemoryUnmanaged>
-        viewL (&hv(nnzD), nsrow, nscol);
+        viewL (&dataL[nnzD], nsrow, nscol);
       auto Ljj = Kokkos::subview (viewL, range_type (0, nscol), Kokkos::ALL ());
 
       #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
@@ -1225,7 +1233,7 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
       }
     }
     else {
-      supernode_ids (num_batchs) = s2;
+      supernode_ids_host (num_batchs) = s2;
       num_batchs ++;
     }
   }
@@ -1237,23 +1245,24 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
     #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
     timer.reset ();
     #endif
+    Kokkos::deep_copy (supernode_ids, supernode_ids_host);
     if (lower) {
       if (unit_diag) {
-        TriSupernodalTrtriFunctor<Uplo::Lower, Diag::Unit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
+        TriSupernodalTrtriFunctor<Uplo::Lower, Diag::Unit, integer_view_t, input_size_type, row_map_type, index_type, values_type>
           sptrsv_tritri_functor (invert_offdiag, supernode_ids, nb, hr, hc, hv);
         Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
       } else {
-        TriSupernodalTrtriFunctor<Uplo::Lower, Diag::NonUnit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
+        TriSupernodalTrtriFunctor<Uplo::Lower, Diag::NonUnit, integer_view_t, input_size_type, row_map_type, index_type, values_type>
           sptrsv_tritri_functor (invert_offdiag, supernode_ids, nb, hr, hc, hv);
         Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
       }
     } else {
       if (unit_diag) {
-        TriSupernodalTrtriFunctor<Uplo::Upper, Diag::Unit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
+        TriSupernodalTrtriFunctor<Uplo::Upper, Diag::Unit, integer_view_t, input_size_type, row_map_type, index_type, values_type>
           sptrsv_tritri_functor (invert_offdiag, supernode_ids, nb, hr, hc, hv);
         Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
       } else {
-        TriSupernodalTrtriFunctor<Uplo::Upper, Diag::NonUnit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
+        TriSupernodalTrtriFunctor<Uplo::Upper, Diag::NonUnit, integer_view_t, input_size_type, row_map_type, index_type, values_type>
           sptrsv_tritri_functor (invert_offdiag, supernode_ids, nb, hr, hc, hv);
         Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
       }
@@ -1329,7 +1338,8 @@ read_merged_supernodes(KernelHandle kernelHandle, int nsuper, const input_ptr_ty
   }
 
   // invert blocks (TODO done on host for now)
-  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, hv);
+  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb,
+                             hr, hr, hc, hv);
   // deepcopy
   Kokkos::deep_copy (values_view, hv);
 
@@ -1482,7 +1492,8 @@ read_supernodal_valuesL(KernelHandle kernelHandle,
   #endif
 
   // invert blocks (TODO done on host for now)
-  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb, hr, hc, hv);
+  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb,
+                             hr, hr, hc, hv);
   // deepcopy
   Kokkos::deep_copy (values_view, hv);
 
@@ -1634,7 +1645,8 @@ read_supernodal_valuesLt(KernelHandle kernelHandle,
   #endif
 
   // invert blocks (TODO done on host for now)
-  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb, hr, hc, hv);
+  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb,
+                             hr, hr, hc, hv);
   // deepcopy
   Kokkos::deep_copy (values_view, hv);
 

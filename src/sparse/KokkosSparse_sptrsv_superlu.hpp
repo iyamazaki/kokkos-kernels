@@ -353,7 +353,7 @@ template <typename crsmat_t,
           typename KernelHandle>
 crsmat_t
 read_superlu_valuesU(KernelHandle kernelHandle,
-                     SuperMatrix *L,  SuperMatrix *U, graph_t &static_graph) {
+                     SuperMatrix *L, SuperMatrix *U, graph_t &static_graph) {
 
   using values_view_t  = typename crsmat_t::values_type::non_const_type;
   using scalar_t       = typename values_view_t::value_type;
@@ -496,14 +496,24 @@ read_superlu_valuesU(KernelHandle kernelHandle,
   std::cout << "    * nnz / n     = " << hr (n)/n << std::endl;
   #endif
 
-  // invert blocks (TODO: done on host for now)
+  // invert blocks
   bool unit_diag = false;
   auto entries = static_graph.entries;
+#if 1
+  // done on device
+  // deepcopy values to device
+  Kokkos::deep_copy (values_view, hv);
+  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb,
+                             hr, rowmap_view, entries, values_view);
+#else
+  // done on host
   auto hc = Kokkos::create_mirror_view (entries);
   Kokkos::deep_copy (hc, entries);
-  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb, hr, hc, hv);
+  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, nb,
+                             hr, hr, hc, hv);
   // deepcopy
   Kokkos::deep_copy (values_view, hv);
+#endif
 
   // create crs
   crsmat_t crsmat("CrsMatrix", n, values_view, static_graph);
