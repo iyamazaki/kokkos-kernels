@@ -221,11 +221,12 @@ int test_sptrsv_perf (std::vector<int> tests, bool verbose, std::string& lower_f
           // ==============================================
           // do symbolic analysis (preprocssing, e.g., merging supernodes, inverting diagonal/offdiagonal blocks,
           // and scheduling based on graph/dag)
+          // note: here, we use U = L'
           khU.get_sptrsv_handle ()->set_column_major (!khL.get_sptrsv_handle ()->is_column_major ());
           sptrsv_supernodal_symbolic (nsuper, supercols.data (), etree, L.graph, &khL, L.graph, &khU);
 
           // ==============================================
-          // do numeric compute (copy numerical values from SuperLU data structure to our sptrsv data structure)
+          // do numeric compute (copy numerical values from L to our sptrsv data structure)
           sptrsv_compute (&khL, L);
 
           // ==============================================
