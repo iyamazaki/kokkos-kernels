@@ -343,6 +343,7 @@ private:
 
   // 
   bool merge_supernodes;
+  bool use_full_dag;
   bool invert_diagonal;
   bool invert_offdiagonal;
   int *etree;
@@ -419,6 +420,7 @@ public:
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
     , unit_diag (false)
     , merge_supernodes (false)
+    , use_full_dag (false)
     , invert_diagonal (true)
     , invert_offdiagonal (false)
     , etree (nullptr)
@@ -575,6 +577,16 @@ public:
   bool get_merge_supernodes() {
     return this->merge_supernodes;
   }
+
+  // specify to generate "full" supernodal dag for scheduling (ILU)
+  void set_use_full_dag(bool flag) {
+    this->use_full_dag= flag;
+  }
+
+  bool get_use_full_dag() {
+    return this->use_full_dag;
+  }
+
 
   // specify etree
   void set_etree(int *etree_) {

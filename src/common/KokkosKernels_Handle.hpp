@@ -726,6 +726,10 @@ public:
     this->sptrsvHandle->set_merge_supernodes (flag);
   }
 
+  void set_sptrsv_use_full_dag(bool flag) {
+    this->sptrsvHandle->set_use_full_dag (flag);
+  }
+
   void set_sptrsv_invert_diagonal(bool flag) {
     this->sptrsvHandle->set_invert_diagonal (flag);
   }

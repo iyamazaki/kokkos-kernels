@@ -1025,10 +1025,15 @@ void sptrsv_supernodal_symbolic(
     auto supL = generate_supernodal_graph<host_graph_t> (!col_majorL, graphL_host, nsuper, supercols);
     auto supU = generate_supernodal_graph<host_graph_t> ( col_majorU, graphU_host, nsuper, supercols);
 
-    auto dagL = generate_supernodal_dag<host_graph_t> (nsuper, supL, supU);
-    auto dagU = generate_supernodal_dag<host_graph_t> (nsuper, supU, supL);
-    handleL->set_supernodal_dag (dagL);
-    handleU->set_supernodal_dag (dagU);
+    if (handleL->get_use_full_dag()) {
+      handleL->set_supernodal_dag (supL);
+      handleU->set_supernodal_dag (supU);
+    } else {
+      auto dagL = generate_supernodal_dag<host_graph_t> (nsuper, supL, supU);
+      auto dagU = generate_supernodal_dag<host_graph_t> (nsuper, supU, supL);
+      handleL->set_supernodal_dag (dagL);
+      handleU->set_supernodal_dag (dagU);
+    }
   }
 
   // ===================================================================

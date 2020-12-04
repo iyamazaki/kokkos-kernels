@@ -410,7 +410,10 @@ void lower_tri_symbolic (TriSolveHandle &thandle, const RowMapType drow_map, con
     for (size_type s = 0; s < nsuper; s++) {
       if (use_dag) {
         for (size_type e = dag_row_map (s); e < dag_row_map (s+1); e++) {
-          check (dag_entries (e)) ++;
+          size_type id = dag_entries(e);
+          if (id != s) { // full dag option includes diagonal entry
+            check (id) ++;
+          }
         }
       } else {
         if (parents[s] >= 0) {
@@ -840,7 +843,10 @@ void upper_tri_symbolic ( TriSolveHandle &thandle, const RowMapType drow_map, co
     if (use_dag) {
       for (size_type s = 0; s < nsuper; s++) {
         for (size_type e = dag_row_map (s); e < dag_row_map (s+1); e++) {
-          check (dag_entries (e)) ++;
+          size_type id = dag_entries(e);
+          if (id != s) { // full dag option includes diagonal entry
+            check (id) ++;
+          }
         }
       }
     } else {
