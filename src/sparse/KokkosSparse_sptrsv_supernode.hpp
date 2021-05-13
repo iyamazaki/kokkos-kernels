@@ -210,6 +210,7 @@ read_supernodal_graphL(KernelHandle kernelHandle, int n, int nsuper, int nnzA, b
   }
   hr(0) = 0;
 
+  #define KOKKOS_SPTRSV_SUPERNODE_PROFILE
   #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
   std::cout << "    * Matrix size = " << n << std::endl;
   std::cout << "    * Total nnz   = " << hr (n) << std::endl;
@@ -1145,6 +1146,7 @@ void sptrsv_supernodal_symbolic(
 
 /* ========================================================================================= */
   struct Tag_SupTrtriFunctor{};
+  struct Tag_SupTrmmFunctor{};
   struct Tag_SupTrtriTrmmFunctor{};
 
   template <typename UploType, typename DiagType, typename integer_view_host_t, 
@@ -1225,6 +1227,40 @@ void sptrsv_supernodal_symbolic(
           invoke(one, Ljj, Lij);
       }
     }
+
+    // functor: just apply inverse to off-diagonal (assume diag is already inverted)
+    KOKKOS_INLINE_FUNCTION
+    void operator() (const Tag_SupTrmmFunctor&, const int i) const {
+      using execution_space = typename values_type::execution_space;
+      using memory_space    = typename execution_space::memory_space;
+      using values_view_t   = typename values_type::non_const_type;
+      using scalar_t        = typename values_view_t::value_type;
+
+      using range_type = Kokkos::pair<int, int>;
+      using TrtriAlgoType = KokkosBatched::Algo::Trtri::Unblocked;
+      using Side  = KokkosBatched::Side;
+      using Trans = KokkosBatched::Trans;
+
+      int s = supernode_ids(i);
+      int j1 = nb[s];
+      int nsrow = hr(j1+1) - hr(j1);
+      int nscol = nb[s +1] - nb[s];
+
+      // get (already-inverted) diagonal
+      auto nnzD = hr (j1);
+      Kokkos::View<scalar_t**, Kokkos::LayoutLeft, memory_space, Kokkos::MemoryUnmanaged>
+        viewL (&hv(nnzD), nsrow, nscol);
+      auto Ljj = Kokkos::subview (viewL, range_type (0, nscol), Kokkos::ALL ());
+
+      // apply invse to off-diagonal
+      //if (nsrow > nscol && invert_offdiag)
+      {
+        const scalar_t one (1.0);
+        auto Lij = Kokkos::subview (viewL, range_type (nscol, nsrow), Kokkos::ALL ());
+        KokkosBatched::SerialTrmm<Side::Right, UploType, Trans::NoTranspose, DiagType, TrtriAlgoType>::
+          invoke(one, Ljj, Lij);
+      }
+    }
   };
 /* ========================================================================================= */
 template <typename KernelHandle, typename input_size_type,
@@ -1252,7 +1288,7 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
   bool lower = ((lower_tri && handle->is_column_major ()) || (!lower_tri && !handle->is_column_major ()));
 
   // quick return
-  if (!invert_diag) return;
+  if (!invert_diag && !invert_offdiag) return;
 
   #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
   Kokkos::Timer timer;
@@ -1284,13 +1320,15 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
         viewL (&hv(nnzD), nsrow, nscol);
       auto Ljj = Kokkos::subview (viewL, range_type (0, nscol), Kokkos::ALL ());
 
-      #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
-      timer.reset ();
-      #endif
-      KokkosBlas::trtri(&uplo_char, &diag_char, Ljj);
-      #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
-      time1 += timer.seconds ();
-      #endif
+      if (invert_diag) {
+        #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
+        timer.reset ();
+        #endif
+        KokkosBlas::trtri(&uplo_char, &diag_char, Ljj);
+        #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
+        time1 += timer.seconds ();
+        #endif
+      }
 
       if (nsrow > nscol && invert_offdiag) {
         char side_char = 'R';
@@ -1322,25 +1360,43 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
     #endif
     if (lower) {
       if (unit_diag) {
-        if (invert_offdiag) {
+        // lower && unit
+        if (invert_diag && invert_offdiag) {
+          // invert both diag & offdiag
           using range_policy = Kokkos::RangePolicy<Tag_SupTrtriTrmmFunctor, execution_space>;
           TriSupernodalTrtriFunctor<Uplo::Lower, Diag::Unit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
             sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
           Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
-        } else {
+        } else if (invert_diag && !invert_offdiag) {
+          // invert just diag
           using range_policy = Kokkos::RangePolicy<Tag_SupTrtriFunctor, execution_space>;
+          TriSupernodalTrtriFunctor<Uplo::Lower, Diag::Unit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
+            sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
+          Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
+        } else if (!invert_diag && invert_offdiag) {
+          // just appy inverted-diag to off-diag
+          using range_policy = Kokkos::RangePolicy<Tag_SupTrmmFunctor, execution_space>;
           TriSupernodalTrtriFunctor<Uplo::Lower, Diag::Unit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
             sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
           Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
         }
       } else {
-        if (invert_offdiag) {
+        // lower && non-unit
+        if (invert_diag && invert_offdiag) {
+          // invert both diag & offdiag
           using range_policy = Kokkos::RangePolicy<Tag_SupTrtriTrmmFunctor, execution_space>;
           TriSupernodalTrtriFunctor<Uplo::Lower, Diag::NonUnit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
             sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
           Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
-        } else {
+        } else if (invert_diag && !invert_offdiag) {
+          // invert just diag
           using range_policy = Kokkos::RangePolicy<Tag_SupTrtriFunctor, execution_space>;
+          TriSupernodalTrtriFunctor<Uplo::Lower, Diag::NonUnit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
+            sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
+          Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
+        } else if (!invert_diag && invert_offdiag) {
+          // just appy inverted-diag to off-diag
+          using range_policy = Kokkos::RangePolicy<Tag_SupTrmmFunctor, execution_space>;
           TriSupernodalTrtriFunctor<Uplo::Lower, Diag::NonUnit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
             sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
           Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
@@ -1348,25 +1404,41 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
       }
     } else {
       if (unit_diag) {
-        if (invert_offdiag) {
+        if (invert_diag && invert_offdiag) {
+          // invert both diag & offdiag
           using range_policy = Kokkos::RangePolicy<Tag_SupTrtriTrmmFunctor, execution_space>;
           TriSupernodalTrtriFunctor<Uplo::Upper, Diag::Unit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
             sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
           Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
-        } else {
+        } else if (invert_diag && !invert_offdiag) {
+          // invert just diag
           using range_policy = Kokkos::RangePolicy<Tag_SupTrtriFunctor, execution_space>;
+          TriSupernodalTrtriFunctor<Uplo::Upper, Diag::Unit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
+            sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
+          Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
+        } else if (!invert_diag && invert_offdiag) {
+          // just appy inverted-diag to off-diag
+          using range_policy = Kokkos::RangePolicy<Tag_SupTrmmFunctor, execution_space>;
           TriSupernodalTrtriFunctor<Uplo::Upper, Diag::Unit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
             sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
           Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
         }
       } else {
-        if (invert_offdiag) {
+        if (invert_diag && invert_offdiag) {
+          // invert both diag & offdiag
           using range_policy = Kokkos::RangePolicy<Tag_SupTrtriTrmmFunctor, execution_space>;
           TriSupernodalTrtriFunctor<Uplo::Upper, Diag::NonUnit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
             sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
           Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
-        } else {
+        } else if (invert_diag && !invert_offdiag) {
+          // invert just diag
           using range_policy = Kokkos::RangePolicy<Tag_SupTrtriFunctor, execution_space>;
+          TriSupernodalTrtriFunctor<Uplo::Upper, Diag::NonUnit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
+            sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
+          Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
+        } else if (!invert_diag && invert_offdiag) {
+          // just appy inverted-diag to off-diag
+          using range_policy = Kokkos::RangePolicy<Tag_SupTrmmFunctor, execution_space>;
           TriSupernodalTrtriFunctor<Uplo::Upper, Diag::NonUnit, integer_view_host_t, input_size_type, row_map_type, index_type, values_type>
             sptrsv_tritri_functor (supernode_ids, nb, hr, hc, hv);
           Kokkos::parallel_for("TriSupernodalTrtriFunctor", range_policy(0, num_batchs), sptrsv_tritri_functor);
@@ -1444,9 +1516,28 @@ read_merged_supernodes(KernelHandle kernelHandle, int nsuper, const input_ptr_ty
   }
 
   // invert blocks (TODO done on host for now)
+  #if 0
   invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, hv);
   // deepcopy
   Kokkos::deep_copy (values_view, hv);
+  #else
+  auto *handle = kernelHandle->get_sptrsv_handle ();
+  bool invert_diag = handle->get_invert_diagonal ();
+  bool invert_offdiag = handle->get_invert_offdiagonal ();
+  // 1) call trtri on host
+  handle->set_invert_offdiagonal (false); // skip trmm on host
+  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, hv);
+  // 2) deepcopy
+   Kokkos::deep_copy (values_view, hv);
+  if (invert_diag && invert_offdiag) {
+    // 3) call trmm on device
+    handle->set_invert_diagonal (false);   // trtri is already done on host
+    handle->set_invert_offdiagonal (true); // trmm on device
+    invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, values_view);
+
+    handle->set_invert_diagonal (true); // reset
+  }
+  #endif
 
   #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
   double time = timer.seconds ();
