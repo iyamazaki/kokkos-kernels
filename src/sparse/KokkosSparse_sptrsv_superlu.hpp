@@ -585,8 +585,14 @@ void sptrsv_compute(
     kernelHandleL->set_sptrsv_invert_diagonal (invert_diag);
     kernelHandleL->set_sptrsv_invert_offdiagonal (invert_offdiag);
     if (useSpMV) {
+      #define SUPERNODAL_SPTRSV_TRMM_ON_DEVICE
+      #ifdef SUPERNODAL_SPTRSV_TRMM_ON_DEVICE
+      superluL = read_merged_supernodes<crsmat_t> (kernelHandleL, nsuper, supercols,
+                                                   unit_diag, superluL_host, graphL);
+      #else
       superluL_host = read_merged_supernodes<host_crsmat_t> (kernelHandleL, nsuper, supercols,
                                                              unit_diag, superluL_host, graphL_host);
+      #endif
     } else {
       superluL = read_merged_supernodes<crsmat_t> (kernelHandleL, nsuper, supercols,
                                                    unit_diag, superluL_host, graphL);
@@ -607,8 +613,13 @@ void sptrsv_compute(
     kernelHandleU->set_sptrsv_invert_diagonal (invert_diag);
     kernelHandleU->set_sptrsv_invert_offdiagonal (invert_offdiag);
     if (useSpMV) {
+      #ifdef SUPERNODAL_SPTRSV_TRMM_ON_DEVICE
+      superluU = read_merged_supernodes<crsmat_t> (kernelHandleU, nsuper, supercols,
+                                                   unit_diag, superluU_host, graphU);
+      #else
       superluU_host = read_merged_supernodes<host_crsmat_t> (kernelHandleU, nsuper, supercols,
                                                              unit_diag, superluU_host, graphU_host);
+      #endif
     } else {
       superluU = read_merged_supernodes<crsmat_t> (kernelHandleU, nsuper, supercols,
                                                    unit_diag, superluU_host, graphU);
@@ -651,8 +662,15 @@ void sptrsv_compute(
     // ----------------------------------------------------
     // split the matrix into submatrices for spmv at each level
     tic.reset ();
+    #ifdef SUPERNODAL_SPTRSV_TRMM_ON_DEVICE
+    split_crsmat<crsmat_t> (kernelHandleL, superluL);
+    split_crsmat<crsmat_t> (kernelHandleU, superluU);
+    #else
     split_crsmat<crsmat_t> (kernelHandleL, superluL_host);
     split_crsmat<crsmat_t> (kernelHandleU, superluU_host);
+    #endif
+    #undef SUPERNODAL_SPTRSV_TRMM_ON_DEVICE
+
     #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
     time_seconds = tic.seconds ();
     std::cout << "   Time to Split to submatrix: " << time_seconds << std::endl;

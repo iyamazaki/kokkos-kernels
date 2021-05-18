@@ -1456,6 +1456,8 @@ invert_supernodal_columns(KernelHandle kernelHandle, bool unit_diag, int nsuper,
   std::cout << "   > Time for inversion::trtri : " << time1 << std::endl;
   std::cout << "   > Time for inversion::trmm  : " << time2 << std::endl;
   std::cout << "   > Time for batchs           : " << time3 << std::endl;
+  std::cout << "   > Execution space           : " << execution_space::name () << std::endl;
+  std::cout << "   > Memory space              : " << memory_space::name () << std::endl;
   #endif
 }
 
@@ -1515,29 +1517,39 @@ read_merged_supernodes(KernelHandle kernelHandle, int nsuper, const input_ptr_ty
     }
   }
 
-  // invert blocks (TODO done on host for now)
-  #if 0
-  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, hv);
-  // deepcopy
-  Kokkos::deep_copy (values_view, hv);
-  #else
-  auto *handle = kernelHandle->get_sptrsv_handle ();
-  bool invert_diag = handle->get_invert_diagonal ();
-  bool invert_offdiag = handle->get_invert_offdiagonal ();
-  // 1) call trtri on host
-  handle->set_invert_offdiagonal (false); // skip trmm on host
-  invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, hv);
-  // 2) deepcopy
+  // invert blocks
+  //#define SUPERNODAL_SPTRSV_TRMM_ON_DEVICE
+  #ifdef SUPERNODAL_SPTRSV_TRMM_ON_DEVICE
+   auto *handle = kernelHandle->get_sptrsv_handle ();
+   bool invert_diag = handle->get_invert_diagonal ();
+   bool invert_offdiag = handle->get_invert_offdiagonal ();
+   // 1) call trtri on host
+   handle->set_invert_offdiagonal (false); // skip trmm on host
+   invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, hv);
+   // 2) deepcopy
    Kokkos::deep_copy (values_view, hv);
-  if (invert_diag && invert_offdiag) {
-    // 3) call trmm on device
-    handle->set_invert_diagonal (false);   // trtri is already done on host
-    handle->set_invert_offdiagonal (true); // trmm on device
-    invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, values_view);
+   if (invert_diag && invert_offdiag) {
+     // 3) call trmm on device
+     handle->set_invert_diagonal (false);   // trtri is already done on host
+     handle->set_invert_offdiagonal (true); // trmm on device
+     #if 1
+     invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, hv);
+     #else
+     invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, values_view);
+     #endif
 
-    handle->set_invert_diagonal (true); // reset
-  }
+     handle->set_invert_diagonal (true); // reset
+   }
+   #if 1
+   Kokkos::deep_copy (values_view, hv);
+   #endif
+  #else
+   // invert blocks (TODO done on host for now)
+   invert_supernodal_columns (kernelHandle, unit_diag, nsuper, mb, hr, hc, hv);
+   // deepcopy
+   Kokkos::deep_copy (values_view, hv);
   #endif
+  #undef SUPERNODAL_SPTRSV_TRMM_ON_DEVICE
 
   #ifdef KOKKOS_SPTRSV_SUPERNODE_PROFILE
   double time = timer.seconds ();
@@ -1585,7 +1597,7 @@ read_supernodal_valuesL(KernelHandle kernelHandle,
 
   // total nnz
   int nnzL = hr (n);
-  values_view_t values_view ("values_view", nnzL);
+  values_view_t values_view ("values_view_L", nnzL);
   auto hv = Kokkos::create_mirror_view (values_view);
   Kokkos::deep_copy (hv, zero); // seems to be needed (instead of zeroing out upper)
 
@@ -1731,7 +1743,7 @@ read_supernodal_valuesLt(KernelHandle kernelHandle,
 
   // total nnz
   int nnzL = hr (n);
-  values_view_t values_view ("values_view", nnzL);
+  values_view_t values_view ("values_view_Lt", nnzL);
   auto hv = Kokkos::create_mirror_view (values_view);
   Kokkos::deep_copy (hv, zero); // seems to be needed (instead of zeroing out upper)
 
@@ -1852,8 +1864,8 @@ read_supernodal_valuesLt(KernelHandle kernelHandle,
 
 
 /* ========================================================================================= */
-template <typename crsmat_t, typename KernelHandle, typename host_crsmat_t>
-void split_crsmat(KernelHandle *kernelHandleL, host_crsmat_t superluL) {
+template <typename crsmat_t, typename KernelHandle, typename input_crsmat_t>
+void split_crsmat(KernelHandle *kernelHandleL, input_crsmat_t superluL) {
 
   using        graph_t = typename crsmat_t::StaticCrsGraphType;
   using row_map_view_t = typename graph_t::row_map_type::non_const_type;
@@ -1938,9 +1950,9 @@ void split_crsmat(KernelHandle *kernelHandleL, host_crsmat_t superluL) {
     }
 
     // allocate subgraph
-    row_map_view_t rowmap_view ("rowmap_view", nrows+1);
-    cols_view_t    column_view ("colmap_view", nnzL);
-    values_view_t  values_view ("values_view", nnzL);
+    row_map_view_t rowmap_view ("rowmap_view_sub", nrows+1);
+    cols_view_t    column_view ("colmap_view_sub", nnzL);
+    values_view_t  values_view ("values_view_sub", nnzL);
     row_map_view_host_t hr = Kokkos::create_mirror_view (rowmap_view);
     cols_view_host_t    hc = Kokkos::create_mirror_view (column_view);
     values_view_host_t  hv = Kokkos::create_mirror_view (values_view);
